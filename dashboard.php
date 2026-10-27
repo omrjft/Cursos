@@ -10,8 +10,27 @@ if (!isset($_SESSION["id"])) {
 
 $db = conect();
 $usuario_id = (int)$_SESSION["id"];
-$nombre = htmlspecialchars($_SESSION["nombre"] ?? "Usuario");
-$rol_id = (int)($_SESSION["rol_id"] ?? 0);
+$stmtCuenta = $db->prepare(
+    "SELECT u.nombre, u.rol_id, u.estado, r.nombre AS rol
+     FROM usuarios u
+     JOIN roles r ON r.id = u.rol_id
+     WHERE u.id = ?"
+);
+$stmtCuenta->bind_param('i', $usuario_id);
+$stmtCuenta->execute();
+$cuentaActual = $stmtCuenta->get_result()->fetch_assoc();
+
+if (!$cuentaActual || $cuentaActual['estado'] !== 'Activo') {
+    $_SESSION = [];
+    session_destroy();
+    header('Location: index.php');
+    exit;
+}
+
+$nombre = htmlspecialchars($cuentaActual['nombre']);
+$rol_id = (int)$cuentaActual['rol_id'];
+$_SESSION['nombre'] = $cuentaActual['nombre'];
+$_SESSION['rol_id'] = $rol_id;
 
 // Determinar tipo de usuario según rol_id (coincidente con la tabla roles)
 switch ($rol_id) {
@@ -89,6 +108,54 @@ if (!$esDirector) {
     }
 }
 
+if ($esDirector && $seccion === 'reportes' && ($_GET['export'] ?? '') === 'csv') {
+    $resultadoExportacion = $db->query(
+        "SELECT c.titulo, COALESCE(u.nombre, 'Sin asignar') AS docente,
+                (SELECT COUNT(*) FROM matriculas m WHERE m.curso_id = c.id) AS alumnos,
+                (SELECT COUNT(*)
+                 FROM entregas_tareas e
+                 JOIN tareas t ON t.id = e.tarea_id
+                 WHERE t.curso_id = c.id AND e.calificacion IS NOT NULL) AS calificaciones,
+                (SELECT COUNT(*)
+                 FROM entregas_tareas e
+                 JOIN tareas t ON t.id = e.tarea_id
+                 WHERE t.curso_id = c.id AND e.calificacion < 7) AS reprobados,
+                (SELECT AVG(e.calificacion)
+                 FROM entregas_tareas e
+                 JOIN tareas t ON t.id = e.tarea_id
+                 WHERE t.curso_id = c.id AND e.calificacion IS NOT NULL) AS promedio
+         FROM cursos c
+         LEFT JOIN usuarios u ON u.id = c.docente_id
+         ORDER BY c.titulo"
+    );
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="reporte-academico.csv"');
+    $salida = fopen('php://output', 'w');
+    fputcsv($salida, ['Curso', 'Docente', 'Alumnos', 'Calificaciones', 'Reprobados', 'Tasa de reprobacion', 'Promedio general']);
+    while ($fila = $resultadoExportacion->fetch_assoc()) {
+        $totalCalificaciones = (int)$fila['calificaciones'];
+        $valoresTexto = [$fila['titulo'], $fila['docente']];
+        foreach ($valoresTexto as &$valorTexto) {
+            if (preg_match('/^[=+\-@]/', (string)$valorTexto)) {
+                $valorTexto = "'" . $valorTexto;
+            }
+        }
+        unset($valorTexto);
+        fputcsv($salida, [
+            $valoresTexto[0],
+            $valoresTexto[1],
+            (int)$fila['alumnos'],
+            $totalCalificaciones,
+            (int)$fila['reprobados'],
+            $totalCalificaciones > 0 ? round((int)$fila['reprobados'] * 100 / $totalCalificaciones, 1) . '%' : '—',
+            $fila['promedio'] === null ? '' : number_format((float)$fila['promedio'], 1)
+        ]);
+    }
+    fclose($salida);
+    exit;
+}
+
 // Mapa de nombres para migas de pan según rol
 $titulos_secciones = [
     'inicio' => 'Dashboard',
@@ -105,6 +172,333 @@ $titulos_secciones = [
     'perfil' => 'Mi Perfil'
 ];
 $seccion_actual_nombre = $titulos_secciones[$seccion] ?? 'Dashboard';
+
+$csrfToken = $_SESSION['csrf_token'] ??= bin2hex(random_bytes(32));
+$mensajeAccion = '';
+
+if (isset($_SESSION['flash_message'])) {
+    $mensajeAccion = (string)$_SESSION['flash_message'];
+    unset($_SESSION['flash_message']);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $tokenEnviado = $_POST['csrf_token'] ?? '';
+    if (!is_string($tokenEnviado) || !hash_equals($csrfToken, $tokenEnviado)) {
+        http_response_code(400);
+        $mensajeAccion = 'La solicitud expiró. Recarga la página e inténtalo de nuevo.';
+    } else {
+        $accion = $_POST['accion'] ?? $_POST['accion_ponente'] ?? '';
+
+        if ($accion === 'crear_usuario' && $esSuperadmin) {
+            $nombreEntrada = $_POST['nombre'] ?? '';
+            $emailEntrada = $_POST['email'] ?? '';
+            $nombreNuevo = is_string($nombreEntrada) ? trim($nombreEntrada) : '';
+            $emailNuevo = is_string($emailEntrada) ? trim($emailEntrada) : '';
+            $passwordNuevo = $_POST['password'] ?? '';
+            $rolNuevo = filter_var($_POST['rol_id'] ?? null, FILTER_VALIDATE_INT);
+
+            if (
+                $nombreNuevo === ''
+                || strlen($nombreNuevo) > 100
+                || !filter_var($emailNuevo, FILTER_VALIDATE_EMAIL)
+                || strlen($emailNuevo) > 150
+                || !is_string($passwordNuevo)
+                || strlen($passwordNuevo) < 10
+                || $rolNuevo === false
+            ) {
+                $mensajeAccion = 'Revisa los datos. El nombre, correo y rol son obligatorios; la contraseña debe tener al menos 10 caracteres.';
+            } else {
+                $stmtRol = $db->prepare('SELECT id FROM roles WHERE id = ?');
+                $stmtRol->bind_param('i', $rolNuevo);
+                $stmtRol->execute();
+                if (!$stmtRol->get_result()->fetch_assoc()) {
+                    $mensajeAccion = 'El rol seleccionado no existe.';
+                } else {
+                    $stmtExiste = $db->prepare('SELECT id FROM usuarios WHERE email = ?');
+                    $stmtExiste->bind_param('s', $emailNuevo);
+                    $stmtExiste->execute();
+                    if ($stmtExiste->get_result()->fetch_assoc()) {
+                        $mensajeAccion = 'Ya existe una cuenta con ese correo.';
+                    } else {
+                        $hashNuevo = password_hash($passwordNuevo, PASSWORD_DEFAULT);
+                        $stmtCrear = $db->prepare(
+                            "INSERT INTO usuarios (rol_id, nombre, email, password_hash, estado)
+                             VALUES (?, ?, ?, ?, 'Activo')"
+                        );
+                        $stmtCrear->bind_param('isss', $rolNuevo, $nombreNuevo, $emailNuevo, $hashNuevo);
+                        $stmtCrear->execute();
+                        $_SESSION['flash_message'] = 'Usuario creado correctamente.';
+                        header('Location: dashboard.php?seccion=usuarios');
+                        exit;
+                    }
+                }
+            }
+        } elseif ($accion === 'cambiar_estado_usuario' && $esSuperadmin) {
+            $usuarioObjetivo = filter_var($_POST['usuario_id'] ?? null, FILTER_VALIDATE_INT);
+            $nuevoEstado = $_POST['estado'] ?? '';
+            if ($usuarioObjetivo === false || !in_array($nuevoEstado, ['Activo', 'Inactivo'], true)) {
+                $mensajeAccion = 'No se pudo validar el cambio de estado del usuario.';
+            } else {
+                $stmtEstado = $db->prepare('UPDATE usuarios SET estado = ? WHERE id = ?');
+                $stmtEstado->bind_param('si', $nuevoEstado, $usuarioObjetivo);
+                $stmtEstado->execute();
+                $_SESSION['flash_message'] = 'Estado del usuario actualizado.';
+                header('Location: dashboard.php?seccion=usuarios');
+                exit;
+            }
+        } elseif ($accion === 'crear_curso' && $esPonente) {
+            $tituloEntrada = $_POST['titulo'] ?? '';
+            $descripcionEntrada = $_POST['descripcion'] ?? '';
+            $tituloNuevo = is_string($tituloEntrada) ? trim($tituloEntrada) : '';
+            $descripcionNueva = is_string($descripcionEntrada) ? trim($descripcionEntrada) : '';
+            if ($tituloNuevo === '' || strlen($tituloNuevo) > 255) {
+                $mensajeAccion = 'El título es obligatorio y no debe exceder 255 caracteres.';
+            } else {
+                $stmtCrearCurso = $db->prepare(
+                    "INSERT INTO cursos (docente_id, titulo, descripcion, estado)
+                     VALUES (?, ?, ?, 'Borrador')"
+                );
+                $stmtCrearCurso->bind_param('iss', $usuario_id, $tituloNuevo, $descripcionNueva);
+                $stmtCrearCurso->execute();
+                $_SESSION['flash_message'] = 'Curso creado en estado Borrador.';
+                header('Location: dashboard.php?seccion=cursos');
+                exit;
+            }
+        } elseif ($accion === 'actualizar_estado_curso' && $esSuperadmin) {
+            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($cursoObjetivo === false) {
+                $mensajeAccion = 'No se pudo validar el curso.';
+            } else {
+                $stmtPublicar = $db->prepare(
+                    "UPDATE cursos SET estado = 'Publicado'
+                     WHERE id = ? AND estado = 'Borrador'"
+                );
+                $stmtPublicar->bind_param('i', $cursoObjetivo);
+                $stmtPublicar->execute();
+                if ($stmtPublicar->affected_rows === 0) {
+                    $mensajeAccion = 'No se encontró el curso o ya está publicado.';
+                } else {
+                    $_SESSION['flash_message'] = 'El curso fue publicado.';
+                    header('Location: dashboard.php?seccion=cursos');
+                    exit;
+                }
+            }
+        } elseif ($accion === 'reasignar_docente' && $esSuperadmin) {
+            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
+            $docenteObjetivo = filter_var($_POST['docente_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($cursoObjetivo === false || $docenteObjetivo === false) {
+                $mensajeAccion = 'Selecciona un curso y un docente válidos.';
+            } else {
+                $stmtEsPonente = $db->prepare(
+                    "SELECT u.id FROM usuarios u
+                     JOIN roles r ON r.id = u.rol_id
+                     WHERE u.id = ? AND r.nombre = 'ponente'"
+                );
+                $stmtEsPonente->bind_param('i', $docenteObjetivo);
+                $stmtEsPonente->execute();
+                if (!$stmtEsPonente->get_result()->fetch_assoc()) {
+                    $mensajeAccion = 'El usuario seleccionado no tiene rol de ponente.';
+                } else {
+                    $stmtCursoExiste = $db->prepare('SELECT id FROM cursos WHERE id = ?');
+                    $stmtCursoExiste->bind_param('i', $cursoObjetivo);
+                    $stmtCursoExiste->execute();
+                    if (!$stmtCursoExiste->get_result()->fetch_assoc()) {
+                        $mensajeAccion = 'No se encontró el curso seleccionado.';
+                    } else {
+                        $stmtAsignar = $db->prepare('UPDATE cursos SET docente_id = ? WHERE id = ?');
+                        $stmtAsignar->bind_param('ii', $docenteObjetivo, $cursoObjetivo);
+                        $stmtAsignar->execute();
+                        $_SESSION['flash_message'] = 'Docente asignado correctamente.';
+                        header('Location: dashboard.php?seccion=cursos');
+                        exit;
+                    }
+                }
+            }
+        } elseif (in_array($accion, ['agregar_bloque', 'agregar_tema', 'calificar_entrega'], true) && $esPonente) {
+            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
+            $stmtPropiedadCurso = $db->prepare('SELECT id FROM cursos WHERE id = ? AND docente_id = ?');
+            if ($cursoObjetivo !== false) {
+                $stmtPropiedadCurso->bind_param('ii', $cursoObjetivo, $usuario_id);
+                $stmtPropiedadCurso->execute();
+            }
+
+            if ($cursoObjetivo === false || !$stmtPropiedadCurso->get_result()->fetch_assoc()) {
+                http_response_code(403);
+                $mensajeAccion = 'No tienes permiso para modificar este curso.';
+            } elseif ($accion === 'agregar_bloque') {
+                $tituloEntrada = $_POST['titulo'] ?? '';
+                $tituloBloque = is_string($tituloEntrada) ? trim($tituloEntrada) : '';
+                if ($tituloBloque === '' || strlen($tituloBloque) > 255) {
+                    $mensajeAccion = 'El título del bloque es obligatorio y no debe exceder 255 caracteres.';
+                } else {
+                    $stmtOrden = $db->prepare('SELECT COALESCE(MAX(orden), 0) + 1 AS siguiente FROM bloques WHERE curso_id = ?');
+                    $stmtOrden->bind_param('i', $cursoObjetivo);
+                    $stmtOrden->execute();
+                    $ordenBloque = (int)$stmtOrden->get_result()->fetch_assoc()['siguiente'];
+                    $stmtNuevoBloque = $db->prepare('INSERT INTO bloques (curso_id, titulo, orden) VALUES (?, ?, ?)');
+                    $stmtNuevoBloque->bind_param('isi', $cursoObjetivo, $tituloBloque, $ordenBloque);
+                    $stmtNuevoBloque->execute();
+                    $_SESSION['flash_message'] = 'Bloque agregado correctamente.';
+                    header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                    exit;
+                }
+            } elseif ($accion === 'agregar_tema') {
+                $bloqueObjetivo = filter_var($_POST['bloque_id'] ?? null, FILTER_VALIDATE_INT);
+                $tituloEntrada = $_POST['titulo'] ?? '';
+                $tituloTema = is_string($tituloEntrada) ? trim($tituloEntrada) : '';
+                if ($bloqueObjetivo === false || $tituloTema === '' || strlen($tituloTema) > 255) {
+                    $mensajeAccion = 'Selecciona un bloque e indica un título de tema válido.';
+                } else {
+                    $stmtBloque = $db->prepare('SELECT id FROM bloques WHERE id = ? AND curso_id = ?');
+                    $stmtBloque->bind_param('ii', $bloqueObjetivo, $cursoObjetivo);
+                    $stmtBloque->execute();
+                    if (!$stmtBloque->get_result()->fetch_assoc()) {
+                        http_response_code(403);
+                        $mensajeAccion = 'El bloque no pertenece a este curso.';
+                    } else {
+                        $stmtOrden = $db->prepare('SELECT COALESCE(MAX(orden), 0) + 1 AS siguiente FROM temas WHERE bloque_id = ?');
+                        $stmtOrden->bind_param('i', $bloqueObjetivo);
+                        $stmtOrden->execute();
+                        $ordenTema = (int)$stmtOrden->get_result()->fetch_assoc()['siguiente'];
+                        $stmtNuevoTema = $db->prepare('INSERT INTO temas (bloque_id, titulo, orden) VALUES (?, ?, ?)');
+                        $stmtNuevoTema->bind_param('isi', $bloqueObjetivo, $tituloTema, $ordenTema);
+                        $stmtNuevoTema->execute();
+                        $_SESSION['flash_message'] = 'Tema agregado correctamente.';
+                        header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                        exit;
+                    }
+                }
+            } else {
+                $entregaObjetivo = filter_var($_POST['entrega_id'] ?? null, FILTER_VALIDATE_INT);
+                $calificacionEntrada = $_POST['calificacion'] ?? null;
+                $calificacion = is_string($calificacionEntrada) && is_numeric($calificacionEntrada)
+                    ? (float)$calificacionEntrada
+                    : null;
+                if (
+                    $entregaObjetivo === false
+                    || $calificacion === null
+                    || !is_finite($calificacion)
+                    || $calificacion < 0
+                    || $calificacion > 10
+                ) {
+                    $mensajeAccion = 'La calificación debe ser un número entre 0 y 10.';
+                } else {
+                    $stmtCalificar = $db->prepare(
+                        "UPDATE entregas_tareas e
+                         JOIN tareas t ON t.id = e.tarea_id
+                         SET e.calificacion = ?
+                         WHERE e.id = ? AND t.curso_id = ? AND e.calificacion IS NULL"
+                    );
+                    $stmtCalificar->bind_param('dii', $calificacion, $entregaObjetivo, $cursoObjetivo);
+                    $stmtCalificar->execute();
+                    if ($stmtCalificar->affected_rows === 0) {
+                        $mensajeAccion = 'No se encontró una entrega pendiente para calificar.';
+                    } else {
+                        $_SESSION['flash_message'] = 'Calificación guardada correctamente.';
+                        header('Location: dashboard.php?seccion=calificar_entregas&id=' . $cursoObjetivo);
+                        exit;
+                    }
+                }
+            }
+        } elseif ($accion === 'actualizar_progreso_tema' && $esAlumno) {
+            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
+            $temaObjetivo = filter_var($_POST['tema_id'] ?? null, FILTER_VALIDATE_INT);
+            $completado = ($_POST['completado'] ?? '') === '1';
+
+            if ($cursoObjetivo === false || $temaObjetivo === false) {
+                $mensajeAccion = 'No se pudo validar el tema seleccionado.';
+            } else {
+                $stmtValidacion = $db->prepare(
+                    'SELECT
+                        EXISTS(
+                            SELECT 1 FROM matriculas
+                            WHERE curso_id = ? AND usuario_id = ?
+                        ) AS matricula_valida,
+                        EXISTS(
+                            SELECT 1
+                            FROM temas t
+                            JOIN bloques b ON b.id = t.bloque_id
+                            WHERE t.id = ? AND b.curso_id = ?
+                        ) AS tema_valido'
+                );
+                $stmtValidacion->bind_param(
+                    'iiii',
+                    $cursoObjetivo,
+                    $usuario_id,
+                    $temaObjetivo,
+                    $cursoObjetivo
+                );
+                $stmtValidacion->execute();
+                $resultadoValidacion = $stmtValidacion->get_result();
+                $validacion = $resultadoValidacion->fetch_assoc();
+                $resultadoValidacion->free();
+                $stmtValidacion->close();
+                $matriculaValida = (bool)$validacion['matricula_valida'];
+                $temaValido = (bool)$validacion['tema_valido'];
+
+                if (!$matriculaValida || !$temaValido) {
+                    http_response_code(403);
+                    $mensajeAccion = 'No tienes permiso para modificar el avance de este tema.';
+                } else {
+                    try {
+                        $db->begin_transaction();
+
+                        if ($completado) {
+                            $stmtCompletar = $db->prepare(
+                                'INSERT IGNORE INTO progreso_temas (usuario_id, tema_id) VALUES (?, ?)'
+                            );
+                            $stmtCompletar->bind_param('ii', $usuario_id, $temaObjetivo);
+                            $stmtCompletar->execute();
+                        } else {
+                            $stmtDesmarcar = $db->prepare(
+                                'DELETE FROM progreso_temas WHERE usuario_id = ? AND tema_id = ?'
+                            );
+                            $stmtDesmarcar->bind_param('ii', $usuario_id, $temaObjetivo);
+                            $stmtDesmarcar->execute();
+                        }
+
+                        $stmtAvance = $db->prepare(
+                            "UPDATE matriculas m
+                             SET progreso_global = (
+                                SELECT CASE WHEN COUNT(DISTINCT t.id) = 0 THEN 0
+                                    ELSE ROUND(COUNT(DISTINCT pt.tema_id) * 100 / COUNT(DISTINCT t.id), 2)
+                                END
+                                FROM cursos c
+                                LEFT JOIN bloques b ON b.curso_id = c.id
+                                LEFT JOIN temas t ON t.bloque_id = b.id
+                                LEFT JOIN progreso_temas pt
+                                  ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
+                                WHERE c.id = m.curso_id
+                             )
+                             WHERE m.usuario_id = ? AND m.curso_id = ?"
+                        );
+                        $stmtAvance->bind_param('ii', $usuario_id, $cursoObjetivo);
+                        $stmtAvance->execute();
+                        $db->commit();
+
+                        $_SESSION['flash_message'] = 'Tu avance se guardó.';
+                        header('Location: dashboard.php?seccion=curso_detalle&id=' . $cursoObjetivo);
+                        exit;
+                    } catch (mysqli_sql_exception $exception) {
+                        $db->rollback();
+                        error_log(
+                            'Error al actualizar progreso del alumno '
+                            . $usuario_id
+                            . ' en el curso '
+                            . $cursoObjetivo
+                            . ': '
+                            . $exception->getMessage()
+                        );
+                        $mensajeAccion = 'No se pudo guardar tu avance. Inténtalo de nuevo y, si el problema continúa, contacta al administrador.';
+                    }
+                }
+            }
+        } else {
+            http_response_code(403);
+            $mensajeAccion = 'No tienes permiso para realizar esta acción.';
+        }
+    }
+}
 
 // ==========================================
 // MÉTRICAS PARA DASHBOARD DEL SUPERADMIN Y DIRECTOR
@@ -158,10 +552,27 @@ $metricas_alumno = [
 ];
 
 if ($esAlumno && $seccion === 'inicio') {
-    $stmtC = $db->prepare("SELECT 
-        SUM(CASE WHEN m.progreso_global >= 100 THEN 1 ELSE 0 END) as completados,
-        SUM(CASE WHEN m.progreso_global < 100 THEN 1 ELSE 0 END) as en_progreso
-        FROM matriculas m WHERE m.usuario_id = ?");
+    $stmtC = $db->prepare(
+        "SELECT
+            SUM(CASE WHEN avance.total_temas > 0
+                      AND avance.temas_completados = avance.total_temas
+                     THEN 1 ELSE 0 END) AS completados,
+            SUM(CASE WHEN avance.total_temas = 0
+                      OR avance.temas_completados < avance.total_temas
+                     THEN 1 ELSE 0 END) AS en_progreso
+         FROM (
+            SELECT m.curso_id,
+                   COUNT(DISTINCT t.id) AS total_temas,
+                   COUNT(DISTINCT pt.tema_id) AS temas_completados
+            FROM matriculas m
+            LEFT JOIN bloques b ON b.curso_id = m.curso_id
+            LEFT JOIN temas t ON t.bloque_id = b.id
+            LEFT JOIN progreso_temas pt
+              ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
+            WHERE m.usuario_id = ?
+            GROUP BY m.curso_id
+         ) AS avance"
+    );
     $stmtC->bind_param("i", $usuario_id);
     $stmtC->execute();
     $resMet = $stmtC->get_result()->fetch_assoc();
@@ -214,12 +625,26 @@ if ($esPonente && $seccion === 'inicio') {
     $metricas_ponente['tareas_pendientes'] = (int)$stmtTP->get_result()->fetch_row()[0];
 }
 
-// Consultar correo del usuario actual
-$stmtP = $db->prepare("SELECT email FROM usuarios WHERE id = ?");
-$stmtP->bind_param("i", $usuario_id);
+$stmtP = $db->prepare('SELECT email FROM usuarios WHERE id = ?');
+$stmtP->bind_param('i', $usuario_id);
 $stmtP->execute();
 $usuarioData = $stmtP->get_result()->fetch_assoc();
 $email_usuario = htmlspecialchars($usuarioData['email'] ?? '—');
+$tipo_usuario = htmlspecialchars($cuentaActual['rol']);
+
+$ponentes = [];
+if ($esSuperadmin) {
+    $resultadoPonentes = $db->query(
+        "SELECT u.id, u.nombre
+         FROM usuarios u
+         JOIN roles r ON r.id = u.rol_id
+         WHERE r.nombre = 'ponente' AND u.estado = 'Activo'
+         ORDER BY u.nombre"
+    );
+    while ($ponente = $resultadoPonentes->fetch_assoc()) {
+        $ponentes[] = $ponente;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -750,14 +1175,6 @@ $email_usuario = htmlspecialchars($usuarioData['email'] ?? '—');
                 <p>Hola <strong><?= $nombre ?></strong>, eres <span class="role-badge"><?= $insignia_rol ?></span></p>
             </div>
 
-            <!-- Icono de notificaciones simulado -->
-            <button type="button" class="notifications-btn" title="Notificaciones" aria-label="Notificaciones">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
-                </svg>
-                <span class="notifications-badge" aria-hidden="true"></span>
-            </button>
-
             <!-- Enlace de Cerrar Sesión -->
             <a href="logout.php" class="btn-logout">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -879,6 +1296,11 @@ $email_usuario = htmlspecialchars($usuarioData['email'] ?? '—');
                 <span class="separator">&gt;</span>
                 <span class="current"><?= htmlspecialchars($seccion_actual_nombre) ?></span>
             </nav>
+            <?php if ($mensajeAccion !== ''): ?>
+                <div class="summary-card" role="status" style="display: block; margin-bottom: 20px;">
+                    <?= htmlspecialchars($mensajeAccion) ?>
+                </div>
+            <?php endif; ?>
 
             <?php
             switch ($seccion) {
@@ -935,18 +1357,20 @@ $email_usuario = htmlspecialchars($usuarioData['email'] ?? '—');
                             <h2 style="font-size: 26px; font-weight: 900; color: var(--color-charcoal); margin: 8px 0 16px 0;">Crear Nuevo Curso</h2>
 
                             <article class="summary-card" style="display: block; max-width: 680px;">
-                                <form method="POST" action="dashboard.php?seccion=cursos">
+                                <form method="POST" action="dashboard.php?seccion=nuevo_curso">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                    <input type="hidden" name="accion" value="crear_curso">
                                     <div style="margin-bottom: 18px;">
                                         <label style="display: block; font-size: 13px; font-weight: 800; color: var(--color-charcoal); text-transform: uppercase; margin-bottom: 6px;">Título del Curso</label>
-                                        <input type="text" placeholder="Ej. Taller Práctico de Microservicios" style="width: 100%; height: 46px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 16px; font-family: var(--font-family); font-size: 15px;" required>
+                                        <input type="text" name="titulo" maxlength="255" style="width: 100%; height: 46px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 16px; font-family: var(--font-family); font-size: 15px;" required>
                                     </div>
                                     <div style="margin-bottom: 18px;">
                                         <label style="display: block; font-size: 13px; font-weight: 800; color: var(--color-charcoal); text-transform: uppercase; margin-bottom: 6px;">Descripción del Curso</label>
-                                        <textarea rows="4" placeholder="Describe los objetivos y requisitos del curso..." style="width: 100%; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 12px 16px; font-family: var(--font-family); font-size: 15px; resize: vertical;" required></textarea>
+                                        <textarea name="descripcion" rows="4" style="width: 100%; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 12px 16px; font-family: var(--font-family); font-size: 15px; resize: vertical;"></textarea>
                                     </div>
                                     <div style="display: flex; gap: 12px; justify-content: flex-end;">
                                         <a href="dashboard.php?seccion=cursos" class="action-btn">Cancelar</a>
-                                        <button type="button" class="welcome-btn" onclick="alert('Funcionalidad de guardado de curso simulada exitosamente.'); window.location.href='dashboard.php?seccion=cursos';">Guardar y Continuar</button>
+                                        <button type="submit" class="welcome-btn">Guardar y Continuar</button>
                                     </div>
                                 </form>
                             </article>
@@ -1000,7 +1424,7 @@ $email_usuario = htmlspecialchars($usuarioData['email'] ?? '—');
                                     + Añadir Nuevo Usuario
                                 </a>
                                 <a href="dashboard.php?seccion=cursos" class="welcome-btn">
-                                    Ver Reportes Globales &rarr;
+                                    Gestionar Cursos &rarr;
                                 </a>
                             </div>
                         </div>

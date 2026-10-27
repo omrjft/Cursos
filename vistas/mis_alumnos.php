@@ -12,10 +12,22 @@ $conexion = conect();
 $ponente_id = (int)$_SESSION["id"];
 
 // Consulta segura filtrando exclusivamente por los cursos del ponente autenticado
-$sql = "SELECT u.nombre, u.email, c.titulo AS curso, m.progreso_global
+$sql = "SELECT u.nombre, u.email, c.titulo AS curso, avance.progreso_global
         FROM matriculas m
         JOIN usuarios u ON m.usuario_id = u.id
         JOIN cursos c ON m.curso_id = c.id
+        JOIN (
+            SELECT matricula.usuario_id, matricula.curso_id,
+                   CASE WHEN COUNT(DISTINCT tema.id) = 0 THEN 0
+                        ELSE ROUND(COUNT(DISTINCT progreso.tema_id) * 100 / COUNT(DISTINCT tema.id), 2)
+                   END AS progreso_global
+            FROM matriculas matricula
+            LEFT JOIN bloques bloque ON bloque.curso_id = matricula.curso_id
+            LEFT JOIN temas tema ON tema.bloque_id = bloque.id
+            LEFT JOIN progreso_temas progreso
+              ON progreso.tema_id = tema.id AND progreso.usuario_id = matricula.usuario_id
+            GROUP BY matricula.usuario_id, matricula.curso_id
+        ) avance ON avance.usuario_id = m.usuario_id AND avance.curso_id = m.curso_id
         WHERE c.docente_id = ?
         ORDER BY u.nombre ASC, c.titulo ASC";
 
@@ -101,4 +113,3 @@ while ($fila = $resultado->fetch_assoc()) {
         </div>
     <?php endif; ?>
 </section>
-

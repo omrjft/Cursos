@@ -19,9 +19,9 @@ $condicionRol = match ($filtroRol) {
 $conexion = conect();
 $resultadoSupervision = $conexion->query(
     "SELECT u.id, u.nombre, u.email,
-            CASE r.nombre WHEN 'alumno' THEN 'Alumno' ELSE 'Ponente' END AS rol,
+            CASE r.nombre WHEN 'alumno' THEN 'Alumno' ELSE 'Docente' END AS rol,
             COALESCE(GROUP_CONCAT(DISTINCT c.titulo ORDER BY c.titulo SEPARATOR ', '), 'Sin cursos asignados') AS cursos_asignados,
-            AVG(m.progreso_global) AS progreso_medio
+            AVG(m.progreso) AS progreso_medio
      FROM usuarios u
      JOIN roles r ON r.id = u.rol_id
      LEFT JOIN cursos c
@@ -29,7 +29,18 @@ $resultadoSupervision = $conexion->query(
             SELECT matricula.curso_id FROM matriculas matricula WHERE matricula.usuario_id = u.id
        ))
        OR (u.rol_id = 4 AND c.docente_id = u.id)
-     LEFT JOIN matriculas m
+     LEFT JOIN (
+       SELECT matricula.usuario_id, matricula.curso_id,
+              CASE WHEN COUNT(DISTINCT tema.id) = 0 THEN 0
+                   ELSE ROUND(COUNT(DISTINCT progreso.tema_id) * 100 / COUNT(DISTINCT tema.id), 2)
+              END AS progreso
+       FROM matriculas matricula
+       LEFT JOIN bloques bloque ON bloque.curso_id = matricula.curso_id
+       LEFT JOIN temas tema ON tema.bloque_id = bloque.id
+       LEFT JOIN progreso_temas progreso
+         ON progreso.tema_id = tema.id AND progreso.usuario_id = matricula.usuario_id
+       GROUP BY matricula.usuario_id, matricula.curso_id
+     ) m
        ON m.curso_id = c.id AND (u.rol_id = 4 OR m.usuario_id = u.id)
      WHERE {$condicionRol}
      GROUP BY u.id, u.nombre, u.email, u.rol_id
@@ -71,13 +82,12 @@ while ($usuario = $resultadoSupervision->fetch_assoc()) {
                     <th>Rol</th>
                     <th style="min-width: 250px;">Cursos Asignados</th>
                     <th style="text-align: center;">Progreso Medio</th>
-                    <th style="text-align: right; min-width: 220px;">Acciones</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($usuariosFiltrados)): ?>
                     <tr>
-                        <td colspan="5" style="text-align: center; color: var(--color-pencil-gray); padding: 24px;">
+                        <td colspan="4" style="text-align: center; color: var(--color-pencil-gray); padding: 24px;">
                             No hay usuarios para mostrar con este filtro.
                         </td>
                     </tr>
@@ -106,15 +116,6 @@ while ($usuario = $resultadoSupervision->fetch_assoc()) {
                             <?php else: ?>
                                 <?= number_format((float)$u['progreso_medio'], 1) ?>%<?= ($u['rol'] === 'Docente') ? ' (promedio alumnos)' : '' ?>
                             <?php endif; ?>
-                        </td>
-                        <td style="text-align: right; white-space: nowrap;">
-                            <!-- Acciones Restringidas del Director: Solo "Ver Detalles" o "Asignar Curso". SIN "Eliminar" ni "Cambiar Rol" -->
-                            <button type="button" class="action-btn" onclick="alert('Detalles de supervisión para: <?= htmlspecialchars($u['nombre']) ?>');" style="margin-right: 6px;">
-                                Ver Detalles
-                            </button>
-                            <button type="button" class="action-btn" onclick="alert('Asignar curso a: <?= htmlspecialchars($u['nombre']) ?>');" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
-                                Asignar Curso
-                            </button>
                         </td>
                     </tr>
                 <?php endforeach; ?>

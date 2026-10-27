@@ -20,13 +20,32 @@ if (!$curso) {
 
 // 2. Obtener progreso de matrícula si es alumno
 $progresoAlumno = 0.0;
+$puedeMarcarProgreso = false;
 if ($esAlumno) {
-    $stmtMat = $conexion->prepare("SELECT progreso_global FROM matriculas WHERE usuario_id = ? AND curso_id = ?");
+    $stmtMat = $conexion->prepare("SELECT 1 FROM matriculas WHERE usuario_id = ? AND curso_id = ?");
     $stmtMat->bind_param("ii", $usuario_id, $cursoId);
     $stmtMat->execute();
     $mat = $stmtMat->get_result()->fetch_assoc();
     if ($mat) {
-        $progresoAlumno = (float)$mat['progreso_global'];
+        $puedeMarcarProgreso = true;
+
+        $stmtAvance = $conexion->prepare(
+            "SELECT COUNT(DISTINCT t.id) AS total_temas,
+                    COUNT(DISTINCT pt.tema_id) AS temas_completados
+             FROM bloques b
+             JOIN temas t ON t.bloque_id = b.id
+             LEFT JOIN progreso_temas pt
+               ON pt.tema_id = t.id AND pt.usuario_id = ?
+             WHERE b.curso_id = ?"
+        );
+        $stmtAvance->bind_param("ii", $usuario_id, $cursoId);
+        $stmtAvance->execute();
+        $avance = $stmtAvance->get_result()->fetch_assoc();
+        $totalTemas = (int)($avance['total_temas'] ?? 0);
+        $temasCompletados = (int)($avance['temas_completados'] ?? 0);
+        $progresoAlumno = $totalTemas > 0
+            ? round($temasCompletados * 100 / $totalTemas, 2)
+            : 0.0;
     }
 }
 
@@ -38,8 +57,15 @@ $stmtB->execute();
 $resB = $stmtB->get_result();
 
 while ($b = $resB->fetch_assoc()) {
-    $stmtT = $conexion->prepare("SELECT id, titulo FROM temas WHERE bloque_id = ? ORDER BY orden ASC");
-    $stmtT->bind_param("i", $b['id']);
+    $stmtT = $conexion->prepare(
+        "SELECT t.id, t.titulo, (pt.tema_id IS NOT NULL) AS completado
+         FROM temas t
+         LEFT JOIN progreso_temas pt
+           ON pt.tema_id = t.id AND pt.usuario_id = ?
+         WHERE t.bloque_id = ?
+         ORDER BY t.orden ASC"
+    );
+    $stmtT->bind_param("ii", $usuario_id, $b['id']);
     $stmtT->execute();
     $resT = $stmtT->get_result();
     $temas = [];
@@ -127,10 +153,13 @@ while ($tar = $resTar->fetch_assoc()) {
             </div>
 
             <p style="font-size: 14px; color: var(--color-pencil-gray); margin-bottom: 20px;">
-                Haz clic en cada casilla para registrar tu progreso en los temas que vayas estudiando.
+                <?= $puedeMarcarProgreso ? 'Marca los temas completados para actualizar tu avance.' : 'Consulta los temas disponibles en este curso.' ?>
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 20px;">
+                <?php if (empty($bloques)): ?>
+                    <p style="color: var(--color-pencil-gray);">Este curso aún no tiene bloques ni temas registrados.</p>
+                <?php endif; ?>
                 <?php foreach ($bloques as $idxBloque => $bloque): ?>
                     <div style="border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 16px; background-color: var(--color-bg-light);">
                         <h4 style="font-size: 16px; font-weight: 800; color: var(--color-charcoal); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
@@ -141,22 +170,25 @@ while ($tar = $resTar->fetch_assoc()) {
                         </h4>
 
                         <ul style="list-style: none; display: flex; flex-direction: column; gap: 10px; padding-left: 6px;">
-                            <?php foreach ($bloque['temas'] as $idxTema => $tema): ?>
-                                <?php 
-                                    // Para modo interactivo alumno: marcar como completados los primeros temas según avance
-                                    $temaCompletado = ($idxBloque === 0 || ($idxBloque === 1 && $idxTema <= 1));
-                                ?>
+                            <?php foreach ($bloque['temas'] as $tema): ?>
+                                <?php $temaCompletado = (bool)$tema['completado']; ?>
                                 <li>
-                                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--color-charcoal); user-select: none;">
-                                        <input 
-                                            type="checkbox" 
-                                            <?= $temaCompletado ? 'checked' : '' ?> 
-                                            style="width: 18px; height: 18px; accent-color: var(--color-eager-green); cursor: pointer;"
-                                        >
-                                        <span style="<?= $temaCompletado ? 'text-decoration: line-through; color: var(--color-pencil-gray);' : '' ?>">
-                                            <?= htmlspecialchars($tema['titulo']) ?>
-                                        </span>
-                                    </label>
+                                    <?php if ($puedeMarcarProgreso): ?>
+                                        <form method="POST" action="dashboard.php?seccion=curso_detalle&amp;id=<?= $cursoId ?>">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                            <input type="hidden" name="accion" value="actualizar_progreso_tema">
+                                            <input type="hidden" name="curso_id" value="<?= $cursoId ?>">
+                                            <input type="hidden" name="tema_id" value="<?= (int)$tema['id'] ?>">
+                                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--color-charcoal); user-select: none;">
+                                                <input type="checkbox" name="completado" value="1" <?= $temaCompletado ? 'checked' : '' ?> onchange="this.form.submit()" style="width: 18px; height: 18px; accent-color: var(--color-eager-green); cursor: pointer;">
+                                                <span style="<?= $temaCompletado ? 'text-decoration: line-through; color: var(--color-pencil-gray);' : '' ?>">
+                                                    <?= htmlspecialchars($tema['titulo']) ?>
+                                                </span>
+                                            </label>
+                                        </form>
+                                    <?php else: ?>
+                                        <span style="font-size: 14px; color: var(--color-charcoal);"><?= htmlspecialchars($tema['titulo']) ?></span>
+                                    <?php endif; ?>
                                 </li>
                             <?php endforeach; ?>
                         </ul>
@@ -168,7 +200,7 @@ while ($tar = $resTar->fetch_assoc()) {
         <!-- Columna Derecha: Materiales de Apoyo y Panel de Tareas -->
         <div style="display: flex; flex-direction: column; gap: 24px;">
 
-            <!-- 2. MATERIALES DE APOYO (Enlaces simulados) -->
+            <!-- 2. MATERIALES DE APOYO -->
             <section class="summary-card" style="display: block; padding: 24px;">
                 <h3 style="font-size: 18px; font-weight: 900; color: var(--color-charcoal); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--color-spark-blue)"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
@@ -179,6 +211,9 @@ while ($tar = $resTar->fetch_assoc()) {
                 </p>
 
                 <ul style="list-style: none; display: flex; flex-direction: column; gap: 10px;">
+                    <?php if (empty($materiales)): ?>
+                        <li style="color: var(--color-pencil-gray);">Este curso aún no tiene materiales registrados.</li>
+                    <?php endif; ?>
                     <?php foreach ($materiales as $mat): ?>
                         <li style="display: flex; align-items: center; justify-content: space-between; background-color: var(--color-bg-light); border: 1px solid var(--color-border-gray); padding: 10px 14px; border-radius: var(--radius-btn);">
                             <div style="display: flex; align-items: center; gap: 10px;">
@@ -187,9 +222,13 @@ while ($tar = $resTar->fetch_assoc()) {
                                     <?= htmlspecialchars($mat['nombre']) ?>
                                 </span>
                             </div>
-                            <a href="<?= htmlspecialchars($mat['url_archivo']) ?>" download="<?= htmlspecialchars($mat['nombre']) ?>" class="action-btn" style="padding: 4px 10px; font-size: 12px; text-decoration: none; border-color: var(--color-spark-blue); color: var(--color-spark-blue);" onclick="alert('Descargando archivo simulado: <?= htmlspecialchars($mat['nombre']) ?>'); return false;">
-                                Descargar
-                            </a>
+                            <?php if (!empty($mat['url_archivo'])): ?>
+                                <a href="<?= htmlspecialchars($mat['url_archivo']) ?>" download="<?= htmlspecialchars($mat['nombre']) ?>" class="action-btn" style="padding: 4px 10px; font-size: 12px; text-decoration: none; border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
+                                    Descargar
+                                </a>
+                            <?php else: ?>
+                                <span style="font-size: 12px; color: var(--color-pencil-gray);">Archivo no disponible</span>
+                            <?php endif; ?>
                         </li>
                     <?php endforeach; ?>
                 </ul>
@@ -206,6 +245,9 @@ while ($tar = $resTar->fetch_assoc()) {
                 </p>
 
                 <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <?php if (empty($tareas)): ?>
+                        <p style="color: var(--color-pencil-gray);">Este curso aún no tiene tareas registradas.</p>
+                    <?php endif; ?>
                     <?php foreach ($tareas as $tar): ?>
                         <div style="border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 14px; background-color: var(--color-paper-white);">
                             <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px;">

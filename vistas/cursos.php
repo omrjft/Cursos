@@ -12,12 +12,12 @@ $esPonente = ($rol_id === 4);
 // =========================================================================
 // 1. MODO SUPERADMIN: Gestión Global de Cursos
 //    - Reestructuración de Tabla: Eliminadas métricas de docente ("Tareas pendientes", "Alumnos inscritos").
-//    - Nuevas Columnas: Título, Docente Asignado, Estado (Borrador, Publicado, Suspendido), Fecha de Creación.
-//    - Nuevas Acciones: Acciones de administración ("Aprobar", "Suspender", "Reasignar Docente").
+//    - Nuevas Columnas: Título, Docente Asignado, Estado (Borrador o Publicado), Fecha de Creación.
+//    - Nuevas Acciones: Publicar un borrador y reasignar al ponente.
 // =========================================================================
 if ($esSuperadmin):
     $stmtGlobal = $conexion->prepare(
-        "SELECT c.id, c.titulo, COALESCE(u.nombre, 'Sin asignar') AS docente,
+        "SELECT c.id, c.titulo, c.docente_id, COALESCE(u.nombre, 'Sin asignar') AS docente,
                 c.estado, c.created_at
          FROM cursos c
          LEFT JOIN usuarios u ON c.docente_id = u.id
@@ -86,22 +86,37 @@ if ($esSuperadmin):
                                 <?= $cg['created_at'] ? htmlspecialchars(date('d/m/Y', strtotime($cg['created_at']))) : '—' ?>
                             </td>
                             <td style="text-align: right; white-space: nowrap;">
-                                <!-- Nuevas Acciones Administrativas del Superadmin -->
                                 <?php if ($cg['estado'] !== 'Publicado'): ?>
-                                    <button type="button" class="action-btn" onclick="alert('Curso aprobado con éxito.');" style="border-color: var(--color-eager-green); color: #2e7a00; margin-right: 4px;">
-                                        Aprobar
-                                    </button>
+                                    <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                        <input type="hidden" name="accion" value="actualizar_estado_curso">
+                                        <input type="hidden" name="curso_id" value="<?= (int)$cg['id'] ?>">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-eager-green); color: #2e7a00; margin-right: 4px;">
+                                            Publicar
+                                        </button>
+                                    </form>
                                 <?php endif; ?>
 
-                                <?php if ($cg['estado'] !== 'Suspendido'): ?>
-                                    <button type="button" class="action-btn" onclick="alert('Curso suspendido.');" style="border-color: #ea2b2b; color: #ea2b2b; margin-right: 4px;">
-                                        Suspender
-                                    </button>
+                                <?php if (!empty($ponentes)): ?>
+                                    <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline-flex; gap: 4px;">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                        <input type="hidden" name="accion" value="reasignar_docente">
+                                        <input type="hidden" name="curso_id" value="<?= (int)$cg['id'] ?>">
+                                        <select name="docente_id" required aria-label="Seleccionar docente para <?= htmlspecialchars($cg['titulo']) ?>" style="max-width: 150px; border: 1px solid var(--color-border-gray); border-radius: 8px; padding: 4px;">
+                                            <option value="">Asignar docente</option>
+                                            <?php foreach ($ponentes as $ponente): ?>
+                                                <option value="<?= (int)$ponente['id'] ?>" <?= (int)$cg['docente_id'] === (int)$ponente['id'] ? 'selected' : '' ?>>
+                                                    <?= htmlspecialchars($ponente['nombre']) ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
+                                            Asignar
+                                        </button>
+                                    </form>
+                                <?php else: ?>
+                                    <span style="font-size: 12px; color: var(--color-pencil-gray);">No hay docentes activos</span>
                                 <?php endif; ?>
-
-                                <button type="button" class="action-btn" onclick="alert('Ventana para reasignar docente.');" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
-                                    Reasignar Docente
-                                </button>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -193,11 +208,19 @@ elseif ($esDirector):
 // 3. MODO ALUMNO (Tarjetas de Cursos Inscritos)
 // ==========================================
 elseif ($esAlumno):
-    $sqlCursosAlumno = "SELECT c.id, c.titulo, c.descripcion, u.nombre as docente, m.progreso_global
+    $sqlCursosAlumno = "SELECT c.id, c.titulo, c.descripcion, u.nombre as docente,
+                               CASE WHEN COUNT(DISTINCT t.id) = 0 THEN 0
+                                    ELSE ROUND(COUNT(DISTINCT pt.tema_id) * 100 / COUNT(DISTINCT t.id), 2)
+                               END AS progreso_global
                         FROM matriculas m
                         JOIN cursos c ON m.curso_id = c.id
                         JOIN usuarios u ON c.docente_id = u.id
+                        LEFT JOIN bloques b ON b.curso_id = c.id
+                        LEFT JOIN temas t ON t.bloque_id = b.id
+                        LEFT JOIN progreso_temas pt
+                          ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
                         WHERE m.usuario_id = ?
+                        GROUP BY m.usuario_id, c.id, c.titulo, c.descripcion, u.nombre
                         ORDER BY c.titulo ASC";
     $stmtCA = $conexion->prepare($sqlCursosAlumno);
     $stmtCA->bind_param("i", $usuario_id);

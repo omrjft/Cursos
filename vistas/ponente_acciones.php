@@ -30,6 +30,7 @@ if (!$curso) {
           </div>";
     return;
 }
+
 ?>
 
 <section>
@@ -51,11 +52,58 @@ if (!$curso) {
                 Organiza la estructura de aprendizaje de tu curso. Los cambios se reflejarán para todos los alumnos matriculados.
             </p>
 
-            <div style="background-color: var(--color-bg-light); border: 2px dashed var(--color-border-gray); border-radius: var(--radius-card); padding: 24px; text-align: center; margin-bottom: 20px;">
-                <p style="font-weight: 700; color: var(--color-charcoal); margin-bottom: 8px;">Módulo de edición de contenidos</p>
-                <p style="font-size: 13px; color: var(--color-pencil-gray); margin-bottom: 16px;">Puedes agregar bloques didácticos, lecciones en video y lecturas descargables.</p>
-                <button type="button" class="welcome-btn" style="cursor: pointer; font-size: 13px; padding: 10px 18px;">+ Agregar Nuevo Bloque</button>
-            </div>
+            <?php
+            $stmtBloques = $conexion->prepare('SELECT id, titulo, orden FROM bloques WHERE curso_id = ? ORDER BY orden, id');
+            $stmtBloques->bind_param('i', $curso_id);
+            $stmtBloques->execute();
+            $resBloques = $stmtBloques->get_result();
+            $bloquesCurso = [];
+            while ($bloque = $resBloques->fetch_assoc()) {
+                $bloquesCurso[] = $bloque;
+            }
+            ?>
+            <?php if (empty($bloquesCurso)): ?>
+                <p style="color: var(--color-pencil-gray); margin-bottom: 16px;">Este curso aún no tiene bloques.</p>
+            <?php else: ?>
+                <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px;">
+                    <?php foreach ($bloquesCurso as $bloque): ?>
+                        <?php
+                        $stmtTemas = $conexion->prepare('SELECT titulo FROM temas WHERE bloque_id = ? ORDER BY orden, id');
+                        $stmtTemas->bind_param('i', $bloque['id']);
+                        $stmtTemas->execute();
+                        $temasBloque = $stmtTemas->get_result();
+                        ?>
+                        <article style="border: 1px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 16px;">
+                            <h4 style="margin-bottom: 10px;"><?= htmlspecialchars($bloque['titulo']) ?></h4>
+                            <?php if ($temasBloque->num_rows > 0): ?>
+                                <ul style="padding-left: 20px; margin-bottom: 14px;">
+                                    <?php while ($tema = $temasBloque->fetch_assoc()): ?>
+                                        <li><?= htmlspecialchars($tema['titulo']) ?></li>
+                                    <?php endwhile; ?>
+                                </ul>
+                            <?php else: ?>
+                                <p style="color: var(--color-pencil-gray); margin-bottom: 14px;">Sin temas registrados.</p>
+                            <?php endif; ?>
+                            <form method="POST" action="dashboard.php?seccion=editar_temario&amp;id=<?= $curso_id ?>" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                <input type="hidden" name="accion_ponente" value="agregar_tema">
+                                <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
+                                <input type="hidden" name="bloque_id" value="<?= (int)$bloque['id'] ?>">
+                                <input name="titulo" maxlength="255" required placeholder="Título del nuevo tema">
+                                <button type="submit" class="action-btn">Agregar tema</button>
+                            </form>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <form method="POST" action="dashboard.php?seccion=editar_temario&amp;id=<?= $curso_id ?>" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                <input type="hidden" name="accion_ponente" value="agregar_bloque">
+                <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
+                <input name="titulo" maxlength="255" required placeholder="Título del nuevo bloque">
+                <button type="submit" class="welcome-btn" style="font-size: 13px; padding: 10px 18px;">+ Agregar Bloque</button>
+            </form>
         </article>
 
     <?php elseif ($accion === 'calificar_entregas'): ?>
@@ -127,9 +175,18 @@ if (!$curso) {
                                     <?php endif; ?>
                                 </td>
                                 <td style="text-align: right;">
-                                    <button type="button" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
-                                        Calificar
-                                    </button>
+                                    <?php if ($entrega['calificacion'] === null): ?>
+                                        <form method="POST" action="dashboard.php?seccion=calificar_entregas&amp;id=<?= $curso_id ?>" style="display: inline-flex; gap: 6px; align-items: center;">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                            <input type="hidden" name="accion_ponente" value="calificar_entrega">
+                                            <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
+                                            <input type="hidden" name="entrega_id" value="<?= (int)$entrega['id'] ?>">
+                                            <input type="number" name="calificacion" min="0" max="10" step="0.01" required aria-label="Calificación para <?= htmlspecialchars($entrega['alumno']) ?>" style="width: 84px;">
+                                            <button type="submit" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
+                                                Guardar
+                                            </button>
+                                        </form>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -139,4 +196,3 @@ if (!$curso) {
         <?php endif; ?>
     <?php endif; ?>
 </section>
-

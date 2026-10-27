@@ -1,20 +1,79 @@
 <?php
 $conexion = conect();
+$busqueda = $_GET['q'] ?? '';
+$filtroRol = filter_var($_GET['rol'] ?? 0, FILTER_VALIDATE_INT);
+$filtroEstado = $_GET['estado'] ?? '';
+$pagina = filter_var($_GET['pagina'] ?? 1, FILTER_VALIDATE_INT);
+$filtroRol = $filtroRol === false ? 0 : $filtroRol;
+$pagina = $pagina === false || $pagina < 1 ? 1 : $pagina;
+$busqueda = is_string($busqueda) ? trim($busqueda) : '';
+$filtroEstado = is_string($filtroEstado) && in_array($filtroEstado, ['Activo', 'Inactivo'], true)
+    ? $filtroEstado
+    : '';
+$porPagina = 50;
+$offset = ($pagina - 1) * $porPagina;
 
 $resultadoEstadisticas = $conexion->query(
     "SELECT COUNT(*) AS total,
-            COALESCE(SUM(rol_id = 3), 0) AS alumnos,
-            COALESCE(SUM(rol_id IN (2, 4)), 0) AS docentes
-     FROM usuarios"
+            COALESCE(SUM(r.nombre = 'alumno'), 0) AS alumnos,
+            COALESCE(SUM(r.nombre = 'ponente'), 0) AS docentes
+     FROM usuarios u
+     LEFT JOIN roles r ON r.id = u.rol_id"
 );
 $estadisticas = $resultadoEstadisticas->fetch_assoc();
 
-$resultadoUsuarios = $conexion->query(
+$roles = [];
+$resultadoRoles = $conexion->query('SELECT id, nombre FROM roles ORDER BY id');
+while ($rol = $resultadoRoles->fetch_assoc()) {
+    $roles[] = $rol;
+}
+
+$stmtTotalUsuarios = $conexion->prepare(
+    "SELECT COUNT(*) AS total FROM usuarios u
+     WHERE (? = '' OR u.nombre LIKE CONCAT('%', ?, '%') OR u.email LIKE CONCAT('%', ?, '%'))
+       AND (? = 0 OR u.rol_id = ?)
+       AND (? = '' OR u.estado = ?)"
+);
+$stmtTotalUsuarios->bind_param(
+    'sssiiss',
+    $busqueda,
+    $busqueda,
+    $busqueda,
+    $filtroRol,
+    $filtroRol,
+    $filtroEstado,
+    $filtroEstado
+);
+$stmtTotalUsuarios->execute();
+$totalFiltrado = (int)$stmtTotalUsuarios->get_result()->fetch_assoc()['total'];
+$totalPaginas = max(1, (int)ceil($totalFiltrado / $porPagina));
+$pagina = min($pagina, $totalPaginas);
+$offset = ($pagina - 1) * $porPagina;
+
+$stmtUsuarios = $conexion->prepare(
     "SELECT u.id, u.nombre, u.email, u.estado, r.nombre AS rol
      FROM usuarios u
      LEFT JOIN roles r ON r.id = u.rol_id
-     ORDER BY u.id DESC"
+     WHERE (? = '' OR u.nombre LIKE CONCAT('%', ?, '%') OR u.email LIKE CONCAT('%', ?, '%'))
+       AND (? = 0 OR u.rol_id = ?)
+       AND (? = '' OR u.estado = ?)
+     ORDER BY u.id DESC
+     LIMIT ? OFFSET ?"
 );
+$stmtUsuarios->bind_param(
+    'sssiissii',
+    $busqueda,
+    $busqueda,
+    $busqueda,
+    $filtroRol,
+    $filtroRol,
+    $filtroEstado,
+    $filtroEstado,
+    $porPagina,
+    $offset
+);
+$stmtUsuarios->execute();
+$resultadoUsuarios = $stmtUsuarios->get_result();
 $usuarios = [];
 while ($usuario = $resultadoUsuarios->fetch_assoc()) {
     $usuarios[] = $usuario;
@@ -31,13 +90,41 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
             </p>
         </div>
 
-        <button type="button" class="welcome-btn" onclick="alert('Formulario de registro manual de nuevo usuario.');" style="font-size: 13px; padding: 10px 18px;">
+        <a href="#nuevo-usuario" class="welcome-btn" style="font-size: 13px; padding: 10px 18px; text-decoration: none;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
             </svg>
             + Nuevo Usuario
-        </button>
+        </a>
     </div>
+
+    <details id="nuevo-usuario" class="summary-card" style="display: block; padding: 20px; margin-bottom: 24px;" <?= $mensajeAccion !== '' ? 'open' : '' ?>>
+        <summary style="cursor: pointer; font-weight: 800; color: var(--color-charcoal);">Registrar usuario</summary>
+        <form method="POST" action="dashboard.php?seccion=usuarios" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 16px;">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+            <input type="hidden" name="accion" value="crear_usuario">
+            <label>Nombre
+                <input name="nombre" maxlength="100" required style="width: 100%; height: 42px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 12px;">
+            </label>
+            <label>Correo electrónico
+                <input type="email" name="email" maxlength="150" required style="width: 100%; height: 42px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 12px;">
+            </label>
+            <label>Contraseña (mínimo 10 caracteres)
+                <input type="password" name="password" minlength="10" required style="width: 100%; height: 42px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 12px;">
+            </label>
+            <label>Rol
+                <select name="rol_id" required style="width: 100%; height: 42px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 12px;">
+                    <option value="">Selecciona un rol</option>
+                    <?php foreach ($roles as $rol): ?>
+                        <option value="<?= (int)$rol['id'] ?>"><?= htmlspecialchars(ucfirst($rol['nombre'])) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <div style="align-self: end;">
+                <button type="submit" class="welcome-btn">Guardar Usuario</button>
+            </div>
+        </form>
+    </details>
 
     <!-- Indicadores de volumen de usuarios -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
@@ -55,9 +142,9 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
         </div>
     </div>
 
-    <!-- Filtros de Búsqueda (Formulario HTML inactivo para alto volumen) -->
+    <!-- Filtros de búsqueda sobre los registros de MySQL -->
     <article class="summary-card" style="display: block; padding: 20px; margin-bottom: 24px;">
-        <form method="GET" action="dashboard.php" onsubmit="return false;" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
+        <form method="GET" action="dashboard.php" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
             <input type="hidden" name="seccion" value="usuarios">
 
             <!-- 1. Barra de búsqueda por nombre/email -->
@@ -68,8 +155,9 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
                 <input 
                     type="text" 
                     id="buscar_usuario" 
-                    name="q" 
-                    placeholder="Ej. Carlos Mendoza o usuario@correo.com" 
+                    name="q"
+                    value="<?= htmlspecialchars($busqueda) ?>"
+                    placeholder="Nombre o correo electrónico"
                     style="width: 100%; height: 42px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 14px; font-family: var(--font-family); font-size: 14px;"
                 >
             </div>
@@ -80,11 +168,12 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
                     Rol
                 </label>
                 <select id="filtro_rol" name="rol" style="width: 100%; height: 42px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 12px; font-family: var(--font-family); font-size: 14px; font-weight: 700; color: var(--color-charcoal); background-color: var(--color-paper-white);">
-                    <option value="">Todos los Roles</option>
-                    <option value="superadmin">Superadmin</option>
-                    <option value="director">Director</option>
-                    <option value="ponente">Docente / Ponente</option>
-                    <option value="alumno">Alumno</option>
+                    <option value="0">Todos los Roles</option>
+                    <?php foreach ($roles as $rol): ?>
+                        <option value="<?= (int)$rol['id'] ?>" <?= $filtroRol === (int)$rol['id'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars(ucfirst($rol['nombre'])) ?>
+                        </option>
+                    <?php endforeach; ?>
                 </select>
             </div>
 
@@ -95,15 +184,14 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
                 </label>
                 <select id="filtro_estado" name="estado" style="width: 100%; height: 42px; border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 0 12px; font-family: var(--font-family); font-size: 14px; font-weight: 700; color: var(--color-charcoal); background-color: var(--color-paper-white);">
                     <option value="">Todos los Estados</option>
-                    <option value="activo">Activo</option>
-                    <option value="inactivo">Inactivo</option>
-                    <option value="pendiente">Pendiente</option>
+                    <option value="Activo" <?= $filtroEstado === 'Activo' ? 'selected' : '' ?>>Activo</option>
+                    <option value="Inactivo" <?= $filtroEstado === 'Inactivo' ? 'selected' : '' ?>>Inactivo</option>
                 </select>
             </div>
 
             <!-- Botón de Filtrar -->
             <div style="min-width: 100px;">
-                <button type="button" class="action-btn" onclick="alert('Filtrado simulado.');" style="height: 42px; width: 100%; border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
+                <button type="submit" class="action-btn" style="height: 42px; width: 100%; border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
                     Filtrar
                 </button>
             </div>
@@ -153,16 +241,33 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
                             </span>
                         </td>
                         <td style="text-align: right; white-space: nowrap;">
-                            <button type="button" class="action-btn" onclick="alert('Editar usuario: <?= htmlspecialchars($usuario['nombre']) ?>');" style="margin-right: 6px;">
-                                Editar
-                            </button>
-                            <button type="button" class="action-btn" onclick="alert('Eliminar usuario: <?= htmlspecialchars($usuario['nombre']) ?>');" style="border-color: #ea2b2b; color: #ea2b2b;">
-                                Eliminar
-                            </button>
+                            <?php if ((int)$usuario['id'] !== $usuario_id): ?>
+                                <form method="POST" action="dashboard.php?seccion=usuarios" style="display: inline;">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                    <input type="hidden" name="accion" value="cambiar_estado_usuario">
+                                    <input type="hidden" name="usuario_id" value="<?= (int)$usuario['id'] ?>">
+                                    <input type="hidden" name="estado" value="<?= $usuario['estado'] === 'Activo' ? 'Inactivo' : 'Activo' ?>">
+                                    <button type="submit" class="action-btn" style="<?= $usuario['estado'] === 'Activo' ? 'border-color: #ea2b2b; color: #ea2b2b;' : 'border-color: var(--color-eager-green); color: #2e7a00;' ?>">
+                                        <?= $usuario['estado'] === 'Activo' ? 'Desactivar' : 'Activar' ?>
+                                    </button>
+                                </form>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+        <span>Mostrando <?= count($usuarios) ?> de <?= $totalFiltrado ?> usuarios</span>
+        <div style="display: flex; gap: 8px;">
+            <?php if ($pagina > 1): ?>
+                <a class="action-btn" href="dashboard.php?seccion=usuarios&amp;q=<?= urlencode($busqueda) ?>&amp;rol=<?= $filtroRol ?>&amp;estado=<?= urlencode($filtroEstado) ?>&amp;pagina=<?= $pagina - 1 ?>">Anterior</a>
+            <?php endif; ?>
+            <span>Página <?= $pagina ?> de <?= $totalPaginas ?></span>
+            <?php if ($pagina < $totalPaginas): ?>
+                <a class="action-btn" href="dashboard.php?seccion=usuarios&amp;q=<?= urlencode($busqueda) ?>&amp;rol=<?= $filtroRol ?>&amp;estado=<?= urlencode($filtroEstado) ?>&amp;pagina=<?= $pagina + 1 ?>">Siguiente</a>
+            <?php endif; ?>
+        </div>
     </div>
 </section>

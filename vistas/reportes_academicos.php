@@ -4,12 +4,23 @@ $conexion = conect();
 
 $consultaMejor = $conexion->query(
     "SELECT u.nombre, c.titulo AS curso, AVG(e.calificacion) AS promedio,
-            MAX(m.progreso_global) AS progreso
+            MAX(m.progreso) AS progreso
      FROM entregas_tareas e
      JOIN tareas t ON e.tarea_id = t.id
      JOIN cursos c ON t.curso_id = c.id
      JOIN usuarios u ON e.usuario_id = u.id
-     LEFT JOIN matriculas m ON m.usuario_id = u.id AND m.curso_id = c.id
+     LEFT JOIN (
+        SELECT matricula.usuario_id, matricula.curso_id,
+               CASE WHEN COUNT(DISTINCT tema.id) = 0 THEN 0
+                    ELSE ROUND(COUNT(DISTINCT progreso.tema_id) * 100 / COUNT(DISTINCT tema.id), 2)
+               END AS progreso
+        FROM matriculas matricula
+        LEFT JOIN bloques bloque ON bloque.curso_id = matricula.curso_id
+        LEFT JOIN temas tema ON tema.bloque_id = bloque.id
+        LEFT JOIN progreso_temas progreso
+          ON progreso.tema_id = tema.id AND progreso.usuario_id = matricula.usuario_id
+        GROUP BY matricula.usuario_id, matricula.curso_id
+     ) m ON m.usuario_id = u.id AND m.curso_id = c.id
      WHERE e.calificacion IS NOT NULL
      GROUP BY u.id, u.nombre, c.id, c.titulo
      ORDER BY promedio DESC
@@ -25,12 +36,23 @@ while ($fila = $consultaMejor->fetch_assoc()) {
 
 $consultaPeor = $conexion->query(
     "SELECT u.nombre, c.titulo AS curso, AVG(e.calificacion) AS promedio,
-            MAX(m.progreso_global) AS progreso
+            MAX(m.progreso) AS progreso
      FROM entregas_tareas e
      JOIN tareas t ON e.tarea_id = t.id
      JOIN cursos c ON t.curso_id = c.id
      JOIN usuarios u ON e.usuario_id = u.id
-     LEFT JOIN matriculas m ON m.usuario_id = u.id AND m.curso_id = c.id
+     LEFT JOIN (
+        SELECT matricula.usuario_id, matricula.curso_id,
+               CASE WHEN COUNT(DISTINCT tema.id) = 0 THEN 0
+                    ELSE ROUND(COUNT(DISTINCT progreso.tema_id) * 100 / COUNT(DISTINCT tema.id), 2)
+               END AS progreso
+        FROM matriculas matricula
+        LEFT JOIN bloques bloque ON bloque.curso_id = matricula.curso_id
+        LEFT JOIN temas tema ON tema.bloque_id = bloque.id
+        LEFT JOIN progreso_temas progreso
+          ON progreso.tema_id = tema.id AND progreso.usuario_id = matricula.usuario_id
+        GROUP BY matricula.usuario_id, matricula.curso_id
+     ) m ON m.usuario_id = u.id AND m.curso_id = c.id
      WHERE e.calificacion IS NOT NULL
      GROUP BY u.id, u.nombre, c.id, c.titulo
      ORDER BY promedio ASC
@@ -88,16 +110,12 @@ while ($fila = $consultaCursos->fetch_assoc()) {
             </p>
         </div>
 
-        <!-- Botón de Exportación Simulado -->
+        <!-- Exportación real de los datos consultados -->
         <div style="display: flex; gap: 10px;">
-            <button type="button" class="action-btn" onclick="alert('Exportando reporte completo a formato CSV...');" style="display: inline-flex; align-items: center; gap: 8px;">
+            <a href="dashboard.php?seccion=reportes&amp;export=csv" class="action-btn" style="display: inline-flex; align-items: center; gap: 8px; text-decoration: none;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 Exportar a CSV
-            </button>
-            <button type="button" class="welcome-btn" onclick="alert('Generando documento PDF oficial de reportes académicos...');" style="font-size: 13px; padding: 10px 16px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-4 11H9v-5h6v5zm4-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
-                Exportar a PDF
-            </button>
+            </a>
         </div>
     </div>
 
