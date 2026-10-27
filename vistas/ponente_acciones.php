@@ -1,0 +1,142 @@
+<?php
+// Vista: Acciones del Ponente (Editar Temario y Calificar Entregas) con control de propiedad en servidor
+if (!isset($_SESSION["id"]) || ($_SESSION["rol_id"] ?? null) != 4) {
+    http_response_code(403);
+    echo "<p style='color: #ea2b2b; font-weight: 700;'>Acceso denegado.</p>";
+    return;
+}
+
+$conexion = conect();
+$ponente_id = (int)$_SESSION["id"];
+$curso_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$accion = $_GET['seccion'] ?? '';
+
+// Comprobar estrictamente la propiedad del curso en el servidor
+$stmtPropiedad = $conexion->prepare("SELECT id, titulo, descripcion, estado FROM cursos WHERE id = ? AND docente_id = ?");
+$stmtPropiedad->bind_param("ii", $curso_id, $ponente_id);
+$stmtPropiedad->execute();
+$curso = $stmtPropiedad->get_result()->fetch_assoc();
+
+if (!$curso) {
+    echo "<div class='summary-card' style='border-color: #ea2b2b;'>
+            <div class='card-icon-wrapper' style='background-color: #ffdfe0; color: #ea2b2b;'>
+                <svg viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z'/></svg>
+            </div>
+            <div>
+                <h3 style='color: #ea2b2b;'>Curso no encontrado o acceso no autorizado</h3>
+                <p style='color: var(--color-pencil-gray); font-size: 14px;'>Solo puedes gestionar cursos de los que eres el ponente titular.</p>
+                <p style='margin-top: 10px;'><a href='dashboard.php?seccion=cursos' class='action-btn'>&larr; Volver a Mis Cursos</a></p>
+            </div>
+          </div>";
+    return;
+}
+?>
+
+<section>
+    <div style="margin-bottom: 20px;">
+        <a href="dashboard.php?seccion=cursos" style="color: var(--color-spark-blue); text-decoration: none; font-weight: 700; font-size: 14px;">
+            &larr; Volver a Mis Cursos
+        </a>
+        <h2 style="font-size: 26px; font-weight: 900; color: var(--color-charcoal); margin-top: 8px;">
+            <?= ($accion === 'editar_temario') ? 'Editar Temario:' : 'Calificar Entregas:' ?> 
+            <span style="color: var(--color-eager-green);"><?= htmlspecialchars($curso['titulo']) ?></span>
+        </h2>
+    </div>
+
+    <?php if ($accion === 'editar_temario'): ?>
+        <!-- Panel de Edición de Temario -->
+        <article class="summary-card" style="display: block;">
+            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 12px;">Gestión de Bloques y Temas</h3>
+            <p style="color: var(--color-pencil-gray); font-size: 14px; margin-bottom: 20px;">
+                Organiza la estructura de aprendizaje de tu curso. Los cambios se reflejarán para todos los alumnos matriculados.
+            </p>
+
+            <div style="background-color: var(--color-bg-light); border: 2px dashed var(--color-border-gray); border-radius: var(--radius-card); padding: 24px; text-align: center; margin-bottom: 20px;">
+                <p style="font-weight: 700; color: var(--color-charcoal); margin-bottom: 8px;">Módulo de edición de contenidos</p>
+                <p style="font-size: 13px; color: var(--color-pencil-gray); margin-bottom: 16px;">Puedes agregar bloques didácticos, lecciones en video y lecturas descargables.</p>
+                <button type="button" class="welcome-btn" style="cursor: pointer; font-size: 13px; padding: 10px 18px;">+ Agregar Nuevo Bloque</button>
+            </div>
+        </article>
+
+    <?php elseif ($accion === 'calificar_entregas'): ?>
+        <!-- Panel de Calificación de Entregas -->
+        <?php
+        // Obtener entregas de tareas pertenecientes a este curso del ponente
+        $sqlEntregas = "SELECT e.id, e.calificacion, e.archivo_url, e.fecha_entrega, u.nombre as alumno, t.titulo as tarea
+                        FROM entregas_tareas e
+                        JOIN tareas t ON e.tarea_id = t.id
+                        JOIN usuarios u ON e.usuario_id = u.id
+                        WHERE t.curso_id = ?
+                        ORDER BY e.fecha_entrega DESC";
+        $stmtE = $conexion->prepare($sqlEntregas);
+        $stmtE->bind_param("i", $curso_id);
+        $stmtE->execute();
+        $resE = $stmtE->get_result();
+        $entregas = [];
+        while ($fila = $resE->fetch_assoc()) {
+            $entregas[] = $fila;
+        }
+        ?>
+
+        <?php if (empty($entregas)): ?>
+            <article class="summary-card" style="text-align: center; justify-content: center; padding: 36px 20px;">
+                <div>
+                    <h3 style="font-size: 18px; font-weight: 800; color: var(--color-charcoal); margin-bottom: 6px;">No hay entregas pendientes para este curso</h3>
+                    <p style="font-size: 14px; color: var(--color-pencil-gray);">
+                        Cuando los alumnos envíen sus prácticas y proyectos, aparecerán aquí para su revisión.
+                    </p>
+                </div>
+            </article>
+        <?php else: ?>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Alumno</th>
+                            <th>Tarea</th>
+                            <th>Fecha de Entrega</th>
+                            <th>Archivo</th>
+                            <th>Estado / Calificación</th>
+                            <th style="text-align: right;">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($entregas as $entrega): ?>
+                            <tr>
+                                <td style="font-weight: 700; color: var(--color-charcoal);">
+                                    <?= htmlspecialchars($entrega['alumno']) ?>
+                                </td>
+                                <td><?= htmlspecialchars($entrega['tarea']) ?></td>
+                                <td style="color: var(--color-pencil-gray); font-size: 13px;">
+                                    <?= htmlspecialchars($entrega['fecha_entrega']) ?>
+                                </td>
+                                <td>
+                                    <span style="color: var(--color-spark-blue); font-weight: 700; font-size: 13px;">
+                                        <?= htmlspecialchars(basename($entrega['archivo_url'] ?? 'entrega.zip')) ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <?php if ($entrega['calificacion'] === null): ?>
+                                        <span style="background-color: #fff4e5; color: #d97706; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800;">
+                                            Pendiente
+                                        </span>
+                                    <?php else: ?>
+                                        <span style="background-color: var(--color-storybook-green); color: #2e7a00; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800;">
+                                            Nota: <?= htmlspecialchars($entrega['calificacion']) ?> / 10
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+                                <td style="text-align: right;">
+                                    <button type="button" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
+                                        Calificar
+                                    </button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    <?php endif; ?>
+</section>
+
