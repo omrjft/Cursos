@@ -41,8 +41,11 @@ $totalCursos = (int)$conexion->query('SELECT COUNT(*) FROM cursos')->fetch_row()
         <article class="summary-card" style="display: block; padding: 24px;">
             <h3 style="font-size: 18px; font-weight: 800; color: var(--color-charcoal); margin-bottom: 8px;">Mantenimiento</h3>
             <p style="font-size: 14px; color: var(--color-pencil-gray);">
-                La base de datos actual no incluye una tabla de configuración global. El modo de mantenimiento no está configurado ni se puede activar desde esta pantalla.
+                Estas acciones son demostrativas y no cambian el estado de la plataforma.
             </p>
+            <button type="button" class="welcome-btn" style="margin-top: 14px;" onclick="alert('Función simulada: activar modo de mantenimiento.')">
+                Activar modo de mantenimiento
+            </button>
         </article>
 
         <article class="summary-card" style="display: block; padding: 24px;">
@@ -75,8 +78,11 @@ $totalCursos = (int)$conexion->query('SELECT COUNT(*) FROM cursos')->fetch_row()
         <article class="summary-card" style="display: block; padding: 24px;">
             <h3 style="font-size: 18px; font-weight: 800; color: var(--color-charcoal); margin-bottom: 8px;">Copias de Seguridad</h3>
             <p style="font-size: 14px; color: var(--color-pencil-gray);">
-                No hay un registro de copias de seguridad en la base de datos y la aplicación no tiene configurado un proceso de respaldo. No se muestran archivos de ejemplo.
+                La creación de copias de seguridad está disponible únicamente como demostración; no se genera ni se guarda ningún archivo.
             </p>
+            <button type="button" class="welcome-btn" style="margin-top: 14px;" onclick="alert('Función simulada: crear copia de seguridad.')">
+                Crear copia de seguridad
+            </button>
         </article>
     </div>
 </section>

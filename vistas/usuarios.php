@@ -81,21 +81,11 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
 ?>
 
 <section>
-    <!-- Encabezado con Acción Principal: "+ Nuevo Usuario" -->
-    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
-        <div>
-            <h2 style="font-size: 26px; font-weight: 900; color: var(--color-charcoal); letter-spacing: -0.01em;">Gestión de Usuarios</h2>
-            <p style="color: var(--color-pencil-gray); font-size: 15px; margin-top: 4px;">
-                Directorio global y administración de cuentas de la plataforma.
-            </p>
-        </div>
-
-        <a href="#nuevo-usuario" class="welcome-btn" style="font-size: 13px; padding: 10px 18px; text-decoration: none;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-            </svg>
-            + Nuevo Usuario
-        </a>
+    <div style="margin-bottom: 24px;">
+        <h2 style="font-size: 26px; font-weight: 900; color: var(--color-charcoal); letter-spacing: -0.01em;">Gestión de Usuarios</h2>
+        <p style="color: var(--color-pencil-gray); font-size: 15px; margin-top: 4px;">
+            Directorio global y administración de cuentas de la plataforma.
+        </p>
     </div>
 
     <details id="nuevo-usuario" class="summary-card" style="display: block; padding: 20px; margin-bottom: 24px;" <?= $mensajeAccion !== '' ? 'open' : '' ?>>

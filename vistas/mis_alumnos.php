@@ -14,7 +14,7 @@ $ponente_id = (int)$_SESSION["id"];
 // Consulta segura filtrando exclusivamente por los cursos del ponente autenticado
 $sql = "SELECT u.nombre, u.email, c.titulo AS curso, avance.progreso_global
         FROM matriculas m
-        JOIN usuarios u ON m.usuario_id = u.id
+        JOIN usuarios u ON m.usuario_id = u.id AND u.estado = 'Activo'
         JOIN cursos c ON m.curso_id = c.id
         JOIN (
             SELECT matricula.usuario_id, matricula.curso_id,

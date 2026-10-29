@@ -9,6 +9,31 @@ if (!isset($_SESSION["id"])) {
 }
 
 $db = conect();
+
+function recalcularProgresoMatricula(mysqli $db, int $alumnoId, int $cursoId): void
+{
+    $stmtActualizarProgreso = $db->prepare(
+        "UPDATE matriculas m
+         SET progreso_global = (
+            SELECT CASE WHEN COUNT(DISTINCT t.id) = 0 THEN 0
+                ELSE ROUND(
+                    COUNT(DISTINCT pt.tema_id) * 100 / COUNT(DISTINCT t.id),
+                    2
+                )
+            END
+            FROM cursos c
+            LEFT JOIN bloques b ON b.curso_id = c.id
+            LEFT JOIN temas t ON t.bloque_id = b.id
+            LEFT JOIN progreso_temas pt
+              ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
+            WHERE c.id = m.curso_id
+         )
+         WHERE m.usuario_id = ? AND m.curso_id = ?"
+    );
+    $stmtActualizarProgreso->bind_param('ii', $alumnoId, $cursoId);
+    $stmtActualizarProgreso->execute();
+}
+
 $usuario_id = (int)$_SESSION["id"];
 $stmtCuenta = $db->prepare(
     "SELECT u.nombre, u.rol_id, u.estado, r.nombre AS rol
@@ -71,7 +96,7 @@ $seccion = $_GET['seccion'] ?? 'inicio';
 // Restricciones de acceso estricto en el servidor:
 // 1. Un alumno no tiene acceso a gestión de usuarios, creación de cursos ni acciones de docente/director/superadmin
 if ($esAlumno) {
-    if (in_array($seccion, ['usuarios', 'supervision_usuarios', 'reportes', 'configuracion', 'mis_alumnos', 'nuevo_curso', 'editar_temario', 'calificar_entregas'])) {
+    if (in_array($seccion, ['usuarios', 'supervision_usuarios', 'reportes', 'configuracion', 'mis_alumnos', 'nuevo_curso', 'editar_temario', 'calificar_entregas', 'revisiones_temas'])) {
         $seccion = 'inicio';
     }
 }
@@ -85,7 +110,7 @@ if ($esPonente) {
 
 // 3. Un director no puede acceder a crear cursos ni editar temarios de ponente, ni configuración global
 if ($esDirector) {
-    if (in_array($seccion, ['nuevo_curso', 'editar_temario', 'calificar_entregas', 'mis_alumnos', 'configuracion'])) {
+    if (in_array($seccion, ['nuevo_curso', 'editar_temario', 'calificar_entregas', 'mis_alumnos', 'configuracion', 'revisiones_temas'])) {
         $seccion = 'inicio';
     }
     if ($seccion === 'usuarios') {
@@ -96,6 +121,22 @@ if ($esDirector) {
 // 4. Solo el superadmin puede acceder a 'configuracion'
 if (!$esSuperadmin && $seccion === 'configuracion') {
     $seccion = 'inicio';
+}
+
+if (!$esSuperadmin && $seccion === 'postulaciones_directores') {
+    $seccion = 'inicio';
+}
+
+if (!$esSuperadmin && $seccion === 'postulaciones_superadmins') {
+    $seccion = 'inicio';
+}
+
+if (!$esPonente && $seccion === 'revisiones_temas') {
+    $seccion = 'inicio';
+}
+
+if (!$esDirector && $seccion === 'postulaciones_ponentes') {
+    $seccion = $esPonente ? 'mis_alumnos' : 'inicio';
 }
 
 // 5. Usuarios que no sean director no acceden a supervisión de usuarios ni reportes
@@ -110,32 +151,70 @@ if (!$esDirector) {
 
 if ($esDirector && $seccion === 'reportes' && ($_GET['export'] ?? '') === 'csv') {
     $resultadoExportacion = $db->query(
-        "SELECT c.titulo, COALESCE(u.nombre, 'Sin asignar') AS docente,
-                (SELECT COUNT(*) FROM matriculas m WHERE m.curso_id = c.id) AS alumnos,
+        "SELECT c.titulo, c.estado, COALESCE(u.nombre, 'Sin asignar') AS docente,
+                (SELECT COUNT(*) FROM matriculas m
+                 JOIN usuarios alumno ON alumno.id = m.usuario_id AND alumno.estado = 'Activo'
+                 WHERE m.curso_id = c.id) AS alumnos_activos,
                 (SELECT COUNT(*)
-                 FROM entregas_tareas e
-                 JOIN tareas t ON t.id = e.tarea_id
-                 WHERE t.curso_id = c.id AND e.calificacion IS NOT NULL) AS calificaciones,
+                 FROM revisiones_temas r
+                 JOIN temas tema ON tema.id = r.tema_id
+                 JOIN bloques bloque ON bloque.id = tema.bloque_id
+                 JOIN usuarios alumno ON alumno.id = r.usuario_id AND alumno.estado = 'Activo'
+                 WHERE bloque.curso_id = c.id
+                   AND r.calificacion IS NOT NULL
+                   AND r.estado IN ('aprobada', 'requiere_correccion')) AS revisiones_evaluadas,
                 (SELECT COUNT(*)
-                 FROM entregas_tareas e
-                 JOIN tareas t ON t.id = e.tarea_id
-                 WHERE t.curso_id = c.id AND e.calificacion < 7) AS reprobados,
+                 FROM revisiones_temas r
+                 JOIN temas tema ON tema.id = r.tema_id
+                 JOIN bloques bloque ON bloque.id = tema.bloque_id
+                 JOIN usuarios alumno ON alumno.id = r.usuario_id AND alumno.estado = 'Activo'
+                 WHERE bloque.curso_id = c.id AND r.estado = 'aprobada'
+                   AND r.calificacion IS NOT NULL) AS revisiones_aprobadas,
+                (SELECT COUNT(*)
+                 FROM progreso_temas progreso
+                 JOIN temas tema ON tema.id = progreso.tema_id
+                 JOIN bloques bloque ON bloque.id = tema.bloque_id
+                 JOIN usuarios alumno ON alumno.id = progreso.usuario_id AND alumno.estado = 'Activo'
+                 WHERE bloque.curso_id = c.id) AS temas_aprobados,
+                (SELECT COUNT(*)
+                 FROM revisiones_temas r
+                 JOIN temas tema ON tema.id = r.tema_id
+                 JOIN bloques bloque ON bloque.id = tema.bloque_id
+                 JOIN usuarios alumno ON alumno.id = r.usuario_id AND alumno.estado = 'Activo'
+                 WHERE bloque.curso_id = c.id
+                   AND r.estado = 'requiere_correccion'
+                   AND r.calificacion IS NOT NULL) AS intentos_con_correccion,
                 (SELECT AVG(e.calificacion)
-                 FROM entregas_tareas e
-                 JOIN tareas t ON t.id = e.tarea_id
-                 WHERE t.curso_id = c.id AND e.calificacion IS NOT NULL) AS promedio
+                 FROM revisiones_temas e
+                 JOIN temas tema ON tema.id = e.tema_id
+                 JOIN bloques bloque ON bloque.id = tema.bloque_id
+                 JOIN usuarios alumno ON alumno.id = e.usuario_id AND alumno.estado = 'Activo'
+                 WHERE bloque.curso_id = c.id
+                   AND e.calificacion IS NOT NULL
+                   AND e.estado IN ('aprobada', 'requiere_correccion')) AS promedio
          FROM cursos c
-         LEFT JOIN usuarios u ON u.id = c.docente_id
+         LEFT JOIN usuarios u ON u.id = c.docente_id AND u.estado = 'Activo'
          ORDER BY c.titulo"
     );
 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="reporte-academico.csv"');
     $salida = fopen('php://output', 'w');
-    fputcsv($salida, ['Curso', 'Docente', 'Alumnos', 'Calificaciones', 'Reprobados', 'Tasa de reprobacion', 'Promedio general']);
+    fputcsv($salida, [
+        'Curso',
+        'Estado del curso',
+        'Docente asignado',
+        'Alumnos activos',
+        'Revisiones evaluadas',
+        'Revisiones aprobadas',
+        'Temas aprobados',
+        'Intentos con correccion',
+        'Tasa de aprobacion de intentos',
+        'Nota promedio'
+    ]);
     while ($fila = $resultadoExportacion->fetch_assoc()) {
-        $totalCalificaciones = (int)$fila['calificaciones'];
-        $valoresTexto = [$fila['titulo'], $fila['docente']];
+        $totalRevisiones = (int)$fila['revisiones_evaluadas'];
+        $valoresTexto = [$fila['titulo'], $fila['estado'], $fila['docente']];
         foreach ($valoresTexto as &$valorTexto) {
             if (preg_match('/^[=+\-@]/', (string)$valorTexto)) {
                 $valorTexto = "'" . $valorTexto;
@@ -145,10 +224,15 @@ if ($esDirector && $seccion === 'reportes' && ($_GET['export'] ?? '') === 'csv')
         fputcsv($salida, [
             $valoresTexto[0],
             $valoresTexto[1],
-            (int)$fila['alumnos'],
-            $totalCalificaciones,
-            (int)$fila['reprobados'],
-            $totalCalificaciones > 0 ? round((int)$fila['reprobados'] * 100 / $totalCalificaciones, 1) . '%' : '—',
+            $valoresTexto[2],
+            (int)$fila['alumnos_activos'],
+            $totalRevisiones,
+            (int)$fila['revisiones_aprobadas'],
+            (int)$fila['temas_aprobados'],
+            (int)$fila['intentos_con_correccion'],
+            $totalRevisiones > 0
+                ? number_format((int)$fila['revisiones_aprobadas'] * 100 / $totalRevisiones, 1) . '%'
+                : '',
             $fila['promedio'] === null ? '' : number_format((float)$fila['promedio'], 1)
         ]);
     }
@@ -161,11 +245,15 @@ $titulos_secciones = [
     'inicio' => 'Dashboard',
     'usuarios' => 'Gestión de Usuarios',
     'supervision_usuarios' => 'Supervisión de Usuarios',
+    'postulaciones_ponentes' => 'Postulaciones de Ponentes',
+    'postulaciones_directores' => 'Postulaciones de Directores',
+    'postulaciones_superadmins' => 'Postulaciones de Superadmins',
     'cursos' => $esSuperadmin ? 'Gestión Global de Cursos' : ($esDirector ? 'Catálogo de Cursos' : 'Mis Cursos'),
     'reportes' => 'Reportes Académicos',
     'configuracion' => 'Configuración del Sistema',
     'curso_detalle' => 'Detalle del Curso',
     'mis_alumnos' => 'Mis Alumnos',
+    'revisiones_temas' => 'Revisión de Temas',
     'editar_temario' => 'Editar Temario',
     'calificar_entregas' => 'Calificar Entregas',
     'nuevo_curso' => 'Crear Curso',
@@ -189,7 +277,504 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $accion = $_POST['accion'] ?? $_POST['accion_ponente'] ?? '';
 
-        if ($accion === 'crear_usuario' && $esSuperadmin) {
+        if (
+            in_array($accion, ['aprobar_postulacion_superadmin', 'rechazar_postulacion_superadmin'], true)
+            && !$esSuperadmin
+        ) {
+            http_response_code(403);
+            $mensajeAccion = 'Solo un superadmin existente puede resolver postulaciones de superadmins.';
+        } elseif ($accion === 'aprobar_postulacion_superadmin' && $esSuperadmin) {
+            $postulacionId = filter_var($_POST['postulacion_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($postulacionId === false || $postulacionId < 1) {
+                $mensajeAccion = 'Selecciona una postulación válida.';
+            } else {
+                try {
+                    $db->begin_transaction();
+
+                    $stmtPostulacionSuperadmin = $db->prepare(
+                        "SELECT id, nombre, email, password_hash
+                         FROM postulaciones_superadmins
+                         WHERE id = ? AND estado = 'pendiente'
+                         FOR UPDATE"
+                    );
+                    $stmtPostulacionSuperadmin->bind_param('i', $postulacionId);
+                    $stmtPostulacionSuperadmin->execute();
+                    $postulacionSuperadmin = $stmtPostulacionSuperadmin->get_result()->fetch_assoc();
+
+                    if (!$postulacionSuperadmin) {
+                        $db->rollback();
+                        $mensajeAccion = 'La postulación ya no está pendiente o no existe.';
+                    } elseif (
+                        !is_string($postulacionSuperadmin['password_hash'])
+                        || (password_get_info($postulacionSuperadmin['password_hash'])['algoName'] ?? 'unknown') === 'unknown'
+                    ) {
+                        throw new RuntimeException('La postulación no contiene un hash de contraseña válido.');
+                    } else {
+                        $stmtRevisor = $db->prepare(
+                            "SELECT u.id
+                             FROM usuarios u
+                             JOIN roles r ON r.id = u.rol_id
+                             WHERE u.id = ? AND u.estado = 'Activo' AND r.nombre = 'superadmin'
+                             FOR UPDATE"
+                        );
+                        $stmtRevisor->bind_param('i', $usuario_id);
+                        $stmtRevisor->execute();
+                        if (!$stmtRevisor->get_result()->fetch_assoc()) {
+                            throw new RuntimeException('El revisor ya no es un superadmin activo.');
+                        }
+
+                        $stmtCuentaSuperadmin = $db->prepare('SELECT id FROM usuarios WHERE email = ? FOR UPDATE');
+                        $stmtCuentaSuperadmin->bind_param('s', $postulacionSuperadmin['email']);
+                        $stmtCuentaSuperadmin->execute();
+                        $cuentaSuperadminExistente = $stmtCuentaSuperadmin->get_result()->fetch_assoc();
+
+                        if ($cuentaSuperadminExistente) {
+                            $db->rollback();
+                            $mensajeAccion = 'No se puede aprobar: ya existe una cuenta con ese correo.';
+                        } else {
+                            $resultadoRolSuperadmin = $db->query("SELECT id FROM roles WHERE nombre = 'superadmin' LIMIT 1");
+                            $rolSuperadmin = $resultadoRolSuperadmin->fetch_assoc();
+                            if (!$rolSuperadmin) {
+                                throw new RuntimeException('No existe el rol de superadmin en la base de datos.');
+                            }
+
+                            $rolSuperadminId = (int)$rolSuperadmin['id'];
+                            $stmtCrearSuperadmin = $db->prepare(
+                                "INSERT INTO usuarios (rol_id, nombre, email, password_hash, estado)
+                                 VALUES (?, ?, ?, ?, 'Activo')"
+                            );
+                            $stmtCrearSuperadmin->bind_param(
+                                'isss',
+                                $rolSuperadminId,
+                                $postulacionSuperadmin['nombre'],
+                                $postulacionSuperadmin['email'],
+                                $postulacionSuperadmin['password_hash']
+                            );
+                            $stmtCrearSuperadmin->execute();
+
+                            $stmtResolverSuperadmin = $db->prepare(
+                                "UPDATE postulaciones_superadmins
+                                 SET estado = 'aprobada', password_hash = NULL,
+                                     fecha_revision = CURRENT_TIMESTAMP,
+                                     superadmin_id = ?, motivo_rechazo = NULL
+                                 WHERE id = ? AND estado = 'pendiente'"
+                            );
+                            $stmtResolverSuperadmin->bind_param('ii', $usuario_id, $postulacionId);
+                            $stmtResolverSuperadmin->execute();
+                            if ($stmtResolverSuperadmin->affected_rows !== 1) {
+                                throw new RuntimeException('La postulación cambió mientras se aprobaba.');
+                            }
+
+                            $db->commit();
+                            $_SESSION['flash_message'] = 'Postulación aprobada; la cuenta de superadmin ya puede iniciar sesión.';
+                            header('Location: dashboard.php?seccion=postulaciones_superadmins');
+                            exit;
+                        }
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    if ($exception instanceof mysqli_sql_exception && $exception->getCode() === 1062) {
+                        $mensajeAccion = 'No se pudo aprobar: ya existe una cuenta o una postulación con ese correo.';
+                    } else {
+                        error_log(
+                            'Error al aprobar postulación de superadmin '
+                            . $postulacionId
+                            . ': '
+                            . $exception->getMessage()
+                        );
+                        $mensajeAccion = 'No se pudo aprobar la postulación. No se guardaron cambios.';
+                    }
+                }
+            }
+        } elseif ($accion === 'rechazar_postulacion_superadmin' && $esSuperadmin) {
+            $postulacionId = filter_var($_POST['postulacion_id'] ?? null, FILTER_VALIDATE_INT);
+            $motivoEntrada = $_POST['motivo_rechazo'] ?? '';
+            $motivoRechazo = is_string($motivoEntrada) ? trim($motivoEntrada) : '';
+            if (
+                $postulacionId === false
+                || $postulacionId < 1
+                || strlen($motivoRechazo) > 500
+            ) {
+                $mensajeAccion = 'La postulación o el motivo de rechazo no son válidos.';
+            } else {
+                try {
+                    $db->begin_transaction();
+                    $stmtResolverSuperadmin = $db->prepare(
+                        "UPDATE postulaciones_superadmins
+                         SET estado = 'rechazada', password_hash = NULL,
+                             fecha_revision = CURRENT_TIMESTAMP,
+                             superadmin_id = ?, motivo_rechazo = ?
+                         WHERE id = ? AND estado = 'pendiente'"
+                    );
+                    $stmtResolverSuperadmin->bind_param('isi', $usuario_id, $motivoRechazo, $postulacionId);
+                    $stmtResolverSuperadmin->execute();
+
+                    if ($stmtResolverSuperadmin->affected_rows !== 1) {
+                        $db->rollback();
+                        $mensajeAccion = 'La postulación ya no está pendiente o no existe.';
+                    } else {
+                        $db->commit();
+                        $_SESSION['flash_message'] = 'La postulación de superadmin fue rechazada.';
+                        header('Location: dashboard.php?seccion=postulaciones_superadmins');
+                        exit;
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    error_log(
+                        'Error al rechazar postulación de superadmin '
+                        . $postulacionId
+                        . ': '
+                        . $exception->getMessage()
+                    );
+                    $mensajeAccion = 'No se pudo rechazar la postulación. Inténtalo de nuevo.';
+                }
+            }
+        } elseif (
+            in_array($accion, ['aprobar_postulacion_director', 'rechazar_postulacion_director'], true)
+            && !$esSuperadmin
+        ) {
+            http_response_code(403);
+            $mensajeAccion = 'No tienes permiso para resolver postulaciones de directores.';
+        } elseif ($accion === 'aprobar_postulacion_director' && $esSuperadmin) {
+            $postulacionId = filter_var($_POST['postulacion_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($postulacionId === false || $postulacionId < 1) {
+                $mensajeAccion = 'Selecciona una postulación válida.';
+            } else {
+                try {
+                    $db->begin_transaction();
+
+                    $stmtPostulacionDirector = $db->prepare(
+                        "SELECT id, nombre, email, password_hash
+                         FROM postulaciones_directores
+                         WHERE id = ? AND estado = 'pendiente'
+                         FOR UPDATE"
+                    );
+                    $stmtPostulacionDirector->bind_param('i', $postulacionId);
+                    $stmtPostulacionDirector->execute();
+                    $postulacionDirector = $stmtPostulacionDirector->get_result()->fetch_assoc();
+
+                    if (!$postulacionDirector) {
+                        $db->rollback();
+                        $mensajeAccion = 'La postulación ya no está pendiente o no existe.';
+                    } elseif (
+                        !is_string($postulacionDirector['password_hash'])
+                        || (password_get_info($postulacionDirector['password_hash'])['algoName'] ?? 'unknown') === 'unknown'
+                    ) {
+                        throw new RuntimeException('La postulación no contiene un hash de contraseña válido.');
+                    } else {
+                        $stmtCuentaDirector = $db->prepare('SELECT id FROM usuarios WHERE email = ? FOR UPDATE');
+                        $stmtCuentaDirector->bind_param('s', $postulacionDirector['email']);
+                        $stmtCuentaDirector->execute();
+                        $cuentaDirectorExistente = $stmtCuentaDirector->get_result()->fetch_assoc();
+
+                        if ($cuentaDirectorExistente) {
+                            $db->rollback();
+                            $mensajeAccion = 'No se puede aprobar: ya existe una cuenta con ese correo.';
+                        } else {
+                            $resultadoRolDirector = $db->query("SELECT id FROM roles WHERE nombre = 'director' LIMIT 1");
+                            $rolDirector = $resultadoRolDirector->fetch_assoc();
+                            if (!$rolDirector) {
+                                throw new RuntimeException('No existe el rol de director en la base de datos.');
+                            }
+
+                            $rolDirectorId = (int)$rolDirector['id'];
+                            $stmtCrearDirector = $db->prepare(
+                                "INSERT INTO usuarios (rol_id, nombre, email, password_hash, estado)
+                                 VALUES (?, ?, ?, ?, 'Activo')"
+                            );
+                            $stmtCrearDirector->bind_param(
+                                'isss',
+                                $rolDirectorId,
+                                $postulacionDirector['nombre'],
+                                $postulacionDirector['email'],
+                                $postulacionDirector['password_hash']
+                            );
+                            $stmtCrearDirector->execute();
+
+                            $stmtResolverDirector = $db->prepare(
+                                "UPDATE postulaciones_directores
+                                 SET estado = 'aprobada', password_hash = NULL,
+                                     fecha_revision = CURRENT_TIMESTAMP,
+                                     superadmin_id = ?, motivo_rechazo = NULL
+                                 WHERE id = ? AND estado = 'pendiente'"
+                            );
+                            $stmtResolverDirector->bind_param('ii', $usuario_id, $postulacionId);
+                            $stmtResolverDirector->execute();
+                            if ($stmtResolverDirector->affected_rows !== 1) {
+                                throw new RuntimeException('La postulación cambió mientras se aprobaba.');
+                            }
+
+                            $db->commit();
+                            $_SESSION['flash_message'] = 'Postulación aprobada; la cuenta de director ya puede iniciar sesión.';
+                            header('Location: dashboard.php?seccion=postulaciones_directores');
+                            exit;
+                        }
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    if ($exception instanceof mysqli_sql_exception && $exception->getCode() === 1062) {
+                        $mensajeAccion = 'No se pudo aprobar: ya existe una cuenta o una postulación con ese correo.';
+                    } else {
+                        error_log(
+                            'Error al aprobar postulación de director '
+                            . $postulacionId
+                            . ': '
+                            . $exception->getMessage()
+                        );
+                        $mensajeAccion = 'No se pudo aprobar la postulación. No se guardaron cambios.';
+                    }
+                }
+            }
+        } elseif ($accion === 'rechazar_postulacion_director' && $esSuperadmin) {
+            $postulacionId = filter_var($_POST['postulacion_id'] ?? null, FILTER_VALIDATE_INT);
+            $motivoEntrada = $_POST['motivo_rechazo'] ?? '';
+            $motivoRechazo = is_string($motivoEntrada) ? trim($motivoEntrada) : '';
+            if (
+                $postulacionId === false
+                || $postulacionId < 1
+                || strlen($motivoRechazo) > 500
+            ) {
+                $mensajeAccion = 'La postulación o el motivo de rechazo no son válidos.';
+            } else {
+                try {
+                    $db->begin_transaction();
+                    $stmtResolverDirector = $db->prepare(
+                        "UPDATE postulaciones_directores
+                         SET estado = 'rechazada', password_hash = NULL,
+                             fecha_revision = CURRENT_TIMESTAMP,
+                             superadmin_id = ?, motivo_rechazo = ?
+                         WHERE id = ? AND estado = 'pendiente'"
+                    );
+                    $stmtResolverDirector->bind_param('isi', $usuario_id, $motivoRechazo, $postulacionId);
+                    $stmtResolverDirector->execute();
+
+                    if ($stmtResolverDirector->affected_rows !== 1) {
+                        $db->rollback();
+                        $mensajeAccion = 'La postulación ya no está pendiente o no existe.';
+                    } else {
+                        $db->commit();
+                        $_SESSION['flash_message'] = 'La postulación de director fue rechazada.';
+                        header('Location: dashboard.php?seccion=postulaciones_directores');
+                        exit;
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    error_log(
+                        'Error al rechazar postulación de director '
+                        . $postulacionId
+                        . ': '
+                        . $exception->getMessage()
+                    );
+                    $mensajeAccion = 'No se pudo rechazar la postulación. Inténtalo de nuevo.';
+                }
+            }
+        } elseif (
+            in_array($accion, ['aprobar_postulacion_ponente', 'rechazar_postulacion_ponente'], true)
+            && !$esDirector
+        ) {
+            http_response_code(403);
+            $mensajeAccion = 'No tienes permiso para resolver postulaciones de ponentes.';
+        } elseif ($accion === 'aprobar_postulacion_ponente' && $esDirector) {
+            $postulacionId = filter_var($_POST['postulacion_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($postulacionId === false || $postulacionId < 1) {
+                $mensajeAccion = 'Selecciona una postulación válida.';
+            } else {
+                try {
+                    $db->begin_transaction();
+
+                    $stmtPostulacion = $db->prepare(
+                        "SELECT id, nombre, email, password_hash
+                         FROM postulaciones_ponentes
+                         WHERE id = ? AND estado = 'pendiente'
+                         FOR UPDATE"
+                    );
+                    $stmtPostulacion->bind_param('i', $postulacionId);
+                    $stmtPostulacion->execute();
+                    $postulacion = $stmtPostulacion->get_result()->fetch_assoc();
+
+                    if (!$postulacion) {
+                        $db->rollback();
+                        $mensajeAccion = 'La postulación ya no está pendiente o no existe.';
+                    } elseif (
+                        !is_string($postulacion['password_hash'])
+                        || (password_get_info($postulacion['password_hash'])['algoName'] ?? 'unknown') === 'unknown'
+                    ) {
+                        throw new RuntimeException('La postulación no contiene un hash de contraseña válido.');
+                    } else {
+                        $stmtCuenta = $db->prepare('SELECT id FROM usuarios WHERE email = ? FOR UPDATE');
+                        $stmtCuenta->bind_param('s', $postulacion['email']);
+                        $stmtCuenta->execute();
+                        $cuentaExistente = $stmtCuenta->get_result()->fetch_assoc();
+
+                        if ($cuentaExistente) {
+                            $db->rollback();
+                            $mensajeAccion = 'No se puede aprobar: ya existe una cuenta con ese correo.';
+                        } else {
+                            $resultadoRol = $db->query("SELECT id FROM roles WHERE nombre = 'ponente' LIMIT 1");
+                            $rolPonente = $resultadoRol->fetch_assoc();
+                            if (!$rolPonente) {
+                                throw new RuntimeException('No existe el rol de ponente en la base de datos.');
+                            }
+
+                            $rolPonenteId = (int)$rolPonente['id'];
+                            $stmtCrearPonente = $db->prepare(
+                                "INSERT INTO usuarios (rol_id, nombre, email, password_hash, estado)
+                                 VALUES (?, ?, ?, ?, 'Activo')"
+                            );
+                            $stmtCrearPonente->bind_param(
+                                'isss',
+                                $rolPonenteId,
+                                $postulacion['nombre'],
+                                $postulacion['email'],
+                                $postulacion['password_hash']
+                            );
+                            $stmtCrearPonente->execute();
+
+                            $stmtResolver = $db->prepare(
+                                "UPDATE postulaciones_ponentes
+                                 SET estado = 'aprobada', password_hash = NULL,
+                                     fecha_revision = CURRENT_TIMESTAMP,
+                                     director_id = ?, motivo_rechazo = NULL
+                                 WHERE id = ? AND estado = 'pendiente'"
+                            );
+                            $stmtResolver->bind_param('ii', $usuario_id, $postulacionId);
+                            $stmtResolver->execute();
+                            if ($stmtResolver->affected_rows !== 1) {
+                                throw new RuntimeException('La postulación cambió mientras se aprobaba.');
+                            }
+
+                            $db->commit();
+                            $_SESSION['flash_message'] = 'Postulación aprobada; la cuenta de ponente ya puede iniciar sesión.';
+                            header('Location: dashboard.php?seccion=postulaciones_ponentes');
+                            exit;
+                        }
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    if ($exception instanceof mysqli_sql_exception && $exception->getCode() === 1062) {
+                        $mensajeAccion = 'No se pudo aprobar: ya existe una cuenta o una postulación con ese correo.';
+                    } else {
+                        error_log(
+                            'Error al aprobar postulación de ponente '
+                            . $postulacionId
+                            . ': '
+                            . $exception->getMessage()
+                        );
+                        $mensajeAccion = 'No se pudo aprobar la postulación. No se guardaron cambios.';
+                    }
+                }
+            }
+        } elseif ($accion === 'rechazar_postulacion_ponente' && $esDirector) {
+            $postulacionId = filter_var($_POST['postulacion_id'] ?? null, FILTER_VALIDATE_INT);
+            $motivoEntrada = $_POST['motivo_rechazo'] ?? '';
+            $motivoRechazo = is_string($motivoEntrada) ? trim($motivoEntrada) : '';
+            if (
+                $postulacionId === false
+                || $postulacionId < 1
+                || strlen($motivoRechazo) > 500
+            ) {
+                $mensajeAccion = 'La postulación o el motivo de rechazo no son válidos.';
+            } else {
+                try {
+                    $db->begin_transaction();
+                    $stmtResolver = $db->prepare(
+                        "UPDATE postulaciones_ponentes
+                         SET estado = 'rechazada', password_hash = NULL,
+                             fecha_revision = CURRENT_TIMESTAMP,
+                             director_id = ?, motivo_rechazo = ?
+                         WHERE id = ? AND estado = 'pendiente'"
+                    );
+                    $stmtResolver->bind_param('isi', $usuario_id, $motivoRechazo, $postulacionId);
+                    $stmtResolver->execute();
+
+                    if ($stmtResolver->affected_rows !== 1) {
+                        $db->rollback();
+                        $mensajeAccion = 'La postulación ya no está pendiente o no existe.';
+                    } else {
+                        $db->commit();
+                        $_SESSION['flash_message'] = 'La postulación fue rechazada.';
+                        header('Location: dashboard.php?seccion=postulaciones_ponentes');
+                        exit;
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    error_log(
+                        'Error al rechazar postulación de ponente '
+                        . $postulacionId
+                        . ': '
+                        . $exception->getMessage()
+                    );
+                    $mensajeAccion = 'No se pudo rechazar la postulación. Inténtalo de nuevo.';
+                }
+            }
+        } elseif ($accion === 'inscribir_curso' && $esAlumno) {
+            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($cursoObjetivo === false || $cursoObjetivo < 1) {
+                $mensajeAccion = 'Selecciona un curso válido para inscribirte.';
+            } else {
+                try {
+                    $db->begin_transaction();
+
+                    $stmtCursoDisponible = $db->prepare(
+                        "SELECT c.id
+                         FROM cursos c
+                         JOIN usuarios ponente ON ponente.id = c.docente_id
+                            AND ponente.estado = 'Activo'
+                         WHERE c.id = ? AND c.estado = 'Publicado'
+                         FOR UPDATE"
+                    );
+                    $stmtCursoDisponible->bind_param('i', $cursoObjetivo);
+                    $stmtCursoDisponible->execute();
+                    $cursoDisponible = $stmtCursoDisponible->get_result()->fetch_assoc();
+
+                    if (!$cursoDisponible) {
+                        $db->rollback();
+                        $mensajeAccion = 'El curso ya no está disponible para inscripción.';
+                    } else {
+                        $stmtMatriculaExistente = $db->prepare(
+                            'SELECT curso_id FROM matriculas
+                             WHERE usuario_id = ? AND curso_id = ?
+                             FOR UPDATE'
+                        );
+                        $stmtMatriculaExistente->bind_param('ii', $usuario_id, $cursoObjetivo);
+                        $stmtMatriculaExistente->execute();
+                        $matriculaExistente = $stmtMatriculaExistente->get_result()->fetch_assoc();
+
+                        if ($matriculaExistente) {
+                            $db->rollback();
+                            $mensajeAccion = 'Ya estás inscrito en este curso.';
+                        } else {
+                            $stmtInscribir = $db->prepare(
+                                'INSERT INTO matriculas (usuario_id, curso_id, progreso_global)
+                                 VALUES (?, ?, 0)'
+                            );
+                            $stmtInscribir->bind_param('ii', $usuario_id, $cursoObjetivo);
+                            $stmtInscribir->execute();
+                            $db->commit();
+
+                            $_SESSION['flash_message'] = 'Te inscribiste al curso correctamente.';
+                            header('Location: dashboard.php?seccion=cursos');
+                            exit;
+                        }
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    if ($exception instanceof mysqli_sql_exception && $exception->getCode() === 1062) {
+                        $mensajeAccion = 'Ya estás inscrito en este curso.';
+                    } else {
+                        error_log(
+                            'Error al inscribir al alumno '
+                            . $usuario_id
+                            . ' en el curso '
+                            . $cursoObjetivo
+                            . ': '
+                            . $exception->getMessage()
+                        );
+                        $mensajeAccion = 'No se pudo completar la inscripción. Inténtalo de nuevo.';
+                    }
+                }
+            }
+        } elseif ($accion === 'crear_usuario' && $esSuperadmin) {
             $nombreEntrada = $_POST['nombre'] ?? '';
             $emailEntrada = $_POST['email'] ?? '';
             $nombreNuevo = is_string($nombreEntrada) ? trim($nombreEntrada) : '';
@@ -264,7 +849,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: dashboard.php?seccion=cursos');
                 exit;
             }
-        } elseif ($accion === 'actualizar_estado_curso' && $esSuperadmin) {
+        } elseif ($accion === 'actualizar_estado_curso' && ($esSuperadmin || $esDirector)) {
             $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
             if ($cursoObjetivo === false) {
                 $mensajeAccion = 'No se pudo validar el curso.';
@@ -279,6 +864,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $mensajeAccion = 'No se encontró el curso o ya está publicado.';
                 } else {
                     $_SESSION['flash_message'] = 'El curso fue publicado.';
+                    header('Location: dashboard.php?seccion=cursos');
+                    exit;
+                }
+            }
+        } elseif ($accion === 'desactivar_curso' && ($esSuperadmin || $esDirector)) {
+            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($cursoObjetivo === false || $cursoObjetivo < 1) {
+                $mensajeAccion = 'No se pudo validar el curso.';
+            } else {
+                $stmtDesactivarCurso = $db->prepare(
+                    "UPDATE cursos SET estado = 'Inactivo'
+                     WHERE id = ? AND estado IN ('Publicado', 'Borrador')"
+                );
+                $stmtDesactivarCurso->bind_param('i', $cursoObjetivo);
+                $stmtDesactivarCurso->execute();
+                if ($stmtDesactivarCurso->affected_rows === 0) {
+                    $mensajeAccion = 'No se encontró un curso activo para desactivar.';
+                } else {
+                    $_SESSION['flash_message'] = 'El curso fue desactivado y dejó de estar disponible para los alumnos.';
+                    header('Location: dashboard.php?seccion=cursos');
+                    exit;
+                }
+            }
+        } elseif ($accion === 'activar_curso' && ($esSuperadmin || $esDirector)) {
+            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($cursoObjetivo === false || $cursoObjetivo < 1) {
+                $mensajeAccion = 'No se pudo validar el curso.';
+            } else {
+                $stmtActivarCurso = $db->prepare(
+                    "UPDATE cursos SET estado = 'Borrador'
+                     WHERE id = ? AND estado = 'Inactivo'"
+                );
+                $stmtActivarCurso->bind_param('i', $cursoObjetivo);
+                $stmtActivarCurso->execute();
+                if ($stmtActivarCurso->affected_rows === 0) {
+                    $mensajeAccion = 'No se encontró un curso desactivado para activar.';
+                } else {
+                    $_SESSION['flash_message'] = 'El curso fue reactivado como borrador. Publícalo para que los alumnos puedan acceder.';
                     header('Location: dashboard.php?seccion=cursos');
                     exit;
                 }
@@ -314,7 +937,260 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
             }
-        } elseif (in_array($accion, ['agregar_bloque', 'agregar_tema', 'calificar_entrega'], true) && $esPonente) {
+        } elseif ($accion === 'solicitar_revision_tema' && $esAlumno) {
+            $temaObjetivo = filter_var($_POST['tema_id'] ?? null, FILTER_VALIDATE_INT);
+            $entregableEntrada = $_POST['entregable_url'] ?? '';
+            $entregableUrl = is_string($entregableEntrada) ? trim($entregableEntrada) : '';
+            $partesUrlEntregable = $entregableUrl !== '' && filter_var($entregableUrl, FILTER_VALIDATE_URL)
+                ? parse_url($entregableUrl)
+                : ($entregableUrl === '' ? null : false);
+            if (
+                $temaObjetivo === false
+                || $temaObjetivo < 1
+                || strlen($entregableUrl) > 2048
+                || ($entregableUrl !== '' && (
+                    $partesUrlEntregable === false
+                    || !in_array(strtolower($partesUrlEntregable['scheme'] ?? ''), ['http', 'https'], true)
+                    || empty($partesUrlEntregable['host'])
+                ))
+            ) {
+                $mensajeAccion = 'Verifica el tema y, si adjuntas un entregable, usa un enlace válido que comience con http:// o https://.';
+            } else {
+                try {
+                    $db->begin_transaction();
+
+                    $stmtTemaRevision = $db->prepare(
+                        'SELECT c.id AS curso_id, c.docente_id, c.estado AS curso_estado
+                         FROM temas t
+                         JOIN bloques b ON b.id = t.bloque_id
+                         JOIN cursos c ON c.id = b.curso_id
+                         JOIN usuarios ponente ON ponente.id = c.docente_id AND ponente.estado = \'Activo\'
+                         WHERE t.id = ?'
+                    );
+                    $stmtTemaRevision->bind_param('i', $temaObjetivo);
+                    $stmtTemaRevision->execute();
+                    $resultadoTemaRevision = $stmtTemaRevision->get_result();
+                    $temaRevision = $resultadoTemaRevision->fetch_assoc();
+                    $resultadoTemaRevision->free();
+                    $stmtTemaRevision->close();
+
+                    if (!$temaRevision || $temaRevision['docente_id'] === null) {
+                        $db->rollback();
+                        http_response_code(404);
+                        $mensajeAccion = 'El tema no existe o su curso no tiene un ponente asignado.';
+                    } elseif ($temaRevision['curso_estado'] !== 'Publicado') {
+                        $db->rollback();
+                        $mensajeAccion = 'El curso no está publicado y no acepta solicitudes de revisión.';
+                    } else {
+                        $cursoRevision = (int)$temaRevision['curso_id'];
+                        $ponenteRevision = (int)$temaRevision['docente_id'];
+
+                        $stmtMatriculaRevision = $db->prepare(
+                            'SELECT curso_id FROM matriculas
+                             WHERE usuario_id = ? AND curso_id = ?
+                             FOR UPDATE'
+                        );
+                        $stmtMatriculaRevision->bind_param('ii', $usuario_id, $cursoRevision);
+                        $stmtMatriculaRevision->execute();
+                        $resultadoMatriculaRevision = $stmtMatriculaRevision->get_result();
+                        $matriculaRevision = $resultadoMatriculaRevision->fetch_assoc();
+                        $resultadoMatriculaRevision->free();
+                        $stmtMatriculaRevision->close();
+
+                        if (!$matriculaRevision) {
+                            $db->rollback();
+                            http_response_code(403);
+                            $mensajeAccion = 'Debes estar matriculado en el curso para solicitar una revisión.';
+                        } else {
+                            $stmtAprobado = $db->prepare(
+                                "SELECT id FROM revisiones_temas
+                                 WHERE usuario_id = ? AND tema_id = ? AND estado = 'aprobada'
+                                 LIMIT 1"
+                            );
+                            $stmtAprobado->bind_param('ii', $usuario_id, $temaObjetivo);
+                            $stmtAprobado->execute();
+                            $resultadoAprobado = $stmtAprobado->get_result();
+                            $temaAprobado = (bool)$resultadoAprobado->fetch_assoc();
+                            $resultadoAprobado->free();
+                            $stmtAprobado->close();
+
+                            if ($temaAprobado) {
+                                $db->rollback();
+                                $mensajeAccion = 'Este tema ya fue aprobado y no requiere otra solicitud.';
+                            } else {
+                                $stmtLimpiarProgreso = $db->prepare(
+                                    'DELETE FROM progreso_temas WHERE usuario_id = ? AND tema_id = ?'
+                                );
+                                $stmtLimpiarProgreso->bind_param('ii', $usuario_id, $temaObjetivo);
+                                $stmtLimpiarProgreso->execute();
+                                recalcularProgresoMatricula($db, $usuario_id, $cursoRevision);
+
+                                $stmtPendiente = $db->prepare(
+                                    "SELECT id FROM revisiones_temas
+                                     WHERE usuario_id = ? AND tema_id = ? AND estado = 'pendiente'
+                                     LIMIT 1"
+                                );
+                                $stmtPendiente->bind_param('ii', $usuario_id, $temaObjetivo);
+                                $stmtPendiente->execute();
+                                $resultadoPendiente = $stmtPendiente->get_result();
+                                $solicitudExistente = (bool)$resultadoPendiente->fetch_assoc();
+                                $resultadoPendiente->free();
+                                $stmtPendiente->close();
+
+                                if ($solicitudExistente) {
+                                    $db->rollback();
+                                    $mensajeAccion = 'La solicitud de este tema ya está pendiente de revisión.';
+                                } else {
+                                    $stmtSolicitud = $db->prepare(
+                                        "INSERT INTO revisiones_temas
+                                            (usuario_id, tema_id, ponente_id, estado, entregable_url)
+                                         VALUES (?, ?, ?, 'pendiente', NULLIF(?, ''))"
+                                    );
+                                    $stmtSolicitud->bind_param(
+                                        'iiis',
+                                        $usuario_id,
+                                        $temaObjetivo,
+                                        $ponenteRevision,
+                                        $entregableUrl
+                                    );
+                                    $stmtSolicitud->execute();
+                                    $db->commit();
+
+                                    $_SESSION['flash_message'] = 'Solicitud enviada al ponente para su revisión.';
+                                    header('Location: dashboard.php?seccion=curso_detalle&id=' . $cursoRevision);
+                                    exit;
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    if ($exception instanceof mysqli_sql_exception && $exception->getCode() === 1062) {
+                        $mensajeAccion = 'La solicitud de este tema ya está pendiente de revisión.';
+                    } else {
+                        error_log(
+                            'Error al solicitar revisión del tema '
+                            . $temaObjetivo
+                            . ' para el alumno '
+                            . $usuario_id
+                            . ': '
+                            . $exception->getMessage()
+                        );
+                        $mensajeAccion = 'No se pudo enviar la solicitud. Inténtalo de nuevo.';
+                    }
+                }
+            }
+        } elseif ($accion === 'calificar_revision_tema' && $esPonente) {
+            $revisionObjetivo = filter_var($_POST['revision_id'] ?? null, FILTER_VALIDATE_INT);
+            $calificacionEntrada = $_POST['calificacion'] ?? null;
+            $observacionEntrada = $_POST['observacion'] ?? null;
+            $calificacion = is_string($calificacionEntrada) && is_numeric($calificacionEntrada)
+                ? (float)$calificacionEntrada
+                : null;
+            $observacion = is_string($observacionEntrada) ? trim($observacionEntrada) : '';
+
+            if (
+                $revisionObjetivo === false
+                || $revisionObjetivo < 1
+                || $calificacion === null
+                || !is_finite($calificacion)
+                || $calificacion < 0
+                || $calificacion > 10
+                || $observacion === ''
+                || strlen($observacion) > 2000
+            ) {
+                $mensajeAccion = 'Indica una calificación entre 0 y 10 y una observación de hasta 2000 caracteres.';
+            } else {
+                try {
+                    $db->begin_transaction();
+                    $stmtRevision = $db->prepare(
+                        "SELECT r.usuario_id, r.tema_id, b.curso_id
+                         FROM revisiones_temas r
+                         JOIN usuarios alumno ON alumno.id = r.usuario_id AND alumno.estado = 'Activo'
+                         JOIN temas t ON t.id = r.tema_id
+                         JOIN bloques b ON b.id = t.bloque_id
+                         JOIN cursos c ON c.id = b.curso_id
+                         WHERE r.id = ? AND r.ponente_id = ?
+                           AND r.estado = 'pendiente' AND c.docente_id = r.ponente_id
+                         FOR UPDATE"
+                    );
+                    $stmtRevision->bind_param('ii', $revisionObjetivo, $usuario_id);
+                    $stmtRevision->execute();
+                    $resultadoRevision = $stmtRevision->get_result();
+                    $revision = $resultadoRevision->fetch_assoc();
+                    $resultadoRevision->free();
+                    $stmtRevision->close();
+
+                    if (!$revision) {
+                        $db->rollback();
+                        http_response_code(403);
+                        $mensajeAccion = 'La solicitud no está pendiente o no pertenece a uno de tus cursos.';
+                    } else {
+                        $estadoRevision = $calificacion >= 7 ? 'aprobada' : 'requiere_correccion';
+                        $stmtGuardarRevision = $db->prepare(
+                            "UPDATE revisiones_temas
+                             SET estado = ?, calificacion = ?, observacion = ?, revisado_en = CURRENT_TIMESTAMP
+                             WHERE id = ? AND estado = 'pendiente'"
+                        );
+                        $stmtGuardarRevision->bind_param(
+                            'sdsi',
+                            $estadoRevision,
+                            $calificacion,
+                            $observacion,
+                            $revisionObjetivo
+                        );
+                        $stmtGuardarRevision->execute();
+
+                        if ($estadoRevision === 'aprobada') {
+                            $stmtCompletarTema = $db->prepare(
+                                'INSERT IGNORE INTO progreso_temas (usuario_id, tema_id)
+                                 VALUES (?, ?)'
+                            );
+                            $stmtCompletarTema->bind_param(
+                                'ii',
+                                $revision['usuario_id'],
+                                $revision['tema_id']
+                            );
+                            $stmtCompletarTema->execute();
+                        } else {
+                            $stmtEliminarProgreso = $db->prepare(
+                                'DELETE FROM progreso_temas WHERE usuario_id = ? AND tema_id = ?'
+                            );
+                            $stmtEliminarProgreso->bind_param(
+                                'ii',
+                                $revision['usuario_id'],
+                                $revision['tema_id']
+                            );
+                            $stmtEliminarProgreso->execute();
+                        }
+
+                        recalcularProgresoMatricula(
+                            $db,
+                            (int)$revision['usuario_id'],
+                            (int)$revision['curso_id']
+                        );
+
+                        $db->commit();
+                        $_SESSION['flash_message'] = $estadoRevision === 'aprobada'
+                            ? 'Tema aprobado y progreso del alumno actualizado.'
+                            : 'Revisión guardada. El alumno debe corregir el tema.';
+                        header('Location: dashboard.php?seccion=revisiones_temas');
+                        exit;
+                    }
+                } catch (Throwable $exception) {
+                    $db->rollback();
+                    error_log(
+                        'Error al calificar revisión '
+                        . $revisionObjetivo
+                        . ' por el ponente '
+                        . $usuario_id
+                        . ': '
+                        . $exception->getMessage()
+                    );
+                    $mensajeAccion = 'No se pudo guardar la revisión. No se modificó el progreso del alumno.';
+                }
+            }
+        } elseif (in_array($accion, ['agregar_bloque', 'agregar_tema', 'actualizar_tema', 'agregar_material', 'actualizar_material', 'eliminar_material', 'calificar_entrega'], true) && $esPonente) {
             $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
             $stmtPropiedadCurso = $db->prepare('SELECT id FROM cursos WHERE id = ? AND docente_id = ?');
             if ($cursoObjetivo !== false) {
@@ -346,8 +1222,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bloqueObjetivo = filter_var($_POST['bloque_id'] ?? null, FILTER_VALIDATE_INT);
                 $tituloEntrada = $_POST['titulo'] ?? '';
                 $tituloTema = is_string($tituloEntrada) ? trim($tituloEntrada) : '';
-                if ($bloqueObjetivo === false || $tituloTema === '' || strlen($tituloTema) > 255) {
-                    $mensajeAccion = 'Selecciona un bloque e indica un título de tema válido.';
+                $descripcionEntrada = $_POST['descripcion'] ?? '';
+                $descripcionTema = is_string($descripcionEntrada) ? trim($descripcionEntrada) : '';
+                if ($bloqueObjetivo === false || $tituloTema === '' || strlen($tituloTema) > 255 || strlen($descripcionTema) > 10000) {
+                    $mensajeAccion = 'Selecciona un bloque, indica un título válido y limita la descripción a 10000 caracteres.';
                 } else {
                     $stmtBloque = $db->prepare('SELECT id FROM bloques WHERE id = ? AND curso_id = ?');
                     $stmtBloque->bind_param('ii', $bloqueObjetivo, $cursoObjetivo);
@@ -360,10 +1238,196 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmtOrden->bind_param('i', $bloqueObjetivo);
                         $stmtOrden->execute();
                         $ordenTema = (int)$stmtOrden->get_result()->fetch_assoc()['siguiente'];
-                        $stmtNuevoTema = $db->prepare('INSERT INTO temas (bloque_id, titulo, orden) VALUES (?, ?, ?)');
-                        $stmtNuevoTema->bind_param('isi', $bloqueObjetivo, $tituloTema, $ordenTema);
+                        $stmtNuevoTema = $db->prepare('INSERT INTO temas (bloque_id, titulo, descripcion, orden) VALUES (?, ?, ?, ?)');
+                        $stmtNuevoTema->bind_param('issi', $bloqueObjetivo, $tituloTema, $descripcionTema, $ordenTema);
                         $stmtNuevoTema->execute();
                         $_SESSION['flash_message'] = 'Tema agregado correctamente.';
+                        header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                        exit;
+                    }
+                }
+            } elseif ($accion === 'actualizar_tema') {
+                $temaObjetivo = filter_var($_POST['tema_id'] ?? null, FILTER_VALIDATE_INT);
+                $tituloEntrada = $_POST['titulo'] ?? '';
+                $tituloTema = is_string($tituloEntrada) ? trim($tituloEntrada) : '';
+                $descripcionEntrada = $_POST['descripcion'] ?? '';
+                $descripcionTema = is_string($descripcionEntrada) ? trim($descripcionEntrada) : '';
+                if (
+                    $temaObjetivo === false
+                    || $tituloTema === ''
+                    || strlen($tituloTema) > 255
+                    || strlen($descripcionTema) > 10000
+                ) {
+                    $mensajeAccion = 'Indica un título válido y una descripción de hasta 10000 caracteres.';
+                } else {
+                    $stmtActualizarTema = $db->prepare(
+                        'UPDATE temas t
+                         JOIN bloques b ON b.id = t.bloque_id
+                         SET t.titulo = ?, t.descripcion = ?
+                         WHERE t.id = ? AND b.curso_id = ?'
+                    );
+                    $stmtActualizarTema->bind_param(
+                        'ssii',
+                        $tituloTema,
+                        $descripcionTema,
+                        $temaObjetivo,
+                        $cursoObjetivo
+                    );
+                    $stmtActualizarTema->execute();
+                    if ($stmtActualizarTema->affected_rows === 0) {
+                        $stmtTemaExiste = $db->prepare(
+                            'SELECT t.id FROM temas t
+                             JOIN bloques b ON b.id = t.bloque_id
+                             WHERE t.id = ? AND b.curso_id = ?'
+                        );
+                        $stmtTemaExiste->bind_param('ii', $temaObjetivo, $cursoObjetivo);
+                        $stmtTemaExiste->execute();
+                        if (!$stmtTemaExiste->get_result()->fetch_assoc()) {
+                            http_response_code(403);
+                            $mensajeAccion = 'El tema no pertenece a este curso.';
+                        } else {
+                            $_SESSION['flash_message'] = 'Descripción del tema actualizada.';
+                            header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                            exit;
+                        }
+                    } else {
+                        $_SESSION['flash_message'] = 'Descripción del tema actualizada.';
+                        header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                        exit;
+                    }
+                }
+            } elseif ($accion === 'agregar_material') {
+                $temaObjetivo = filter_var($_POST['tema_id'] ?? null, FILTER_VALIDATE_INT);
+                $nombreEntrada = $_POST['nombre'] ?? '';
+                $urlEntrada = $_POST['url_externa'] ?? '';
+                $nombreMaterial = is_string($nombreEntrada) ? trim($nombreEntrada) : '';
+                $urlMaterial = is_string($urlEntrada) ? trim($urlEntrada) : '';
+                $partesUrlMaterial = filter_var($urlMaterial, FILTER_VALIDATE_URL)
+                    ? parse_url($urlMaterial)
+                    : false;
+                if (
+                    $temaObjetivo === false
+                    || $nombreMaterial === ''
+                    || strlen($nombreMaterial) > 255
+                    || strlen($urlMaterial) > 2048
+                    || $partesUrlMaterial === false
+                    || !in_array(strtolower($partesUrlMaterial['scheme'] ?? ''), ['http', 'https'], true)
+                    || empty($partesUrlMaterial['host'])
+                ) {
+                    $mensajeAccion = 'Indica un nombre y un enlace externo válido que comience con http:// o https://.';
+                } else {
+                    $stmtAgregarMaterial = $db->prepare(
+                        "INSERT INTO materiales (tema_id, tipo, nombre, url_externa)
+                         SELECT t.id, 'Enlace', ?, ?
+                         FROM temas t
+                         JOIN bloques b ON b.id = t.bloque_id
+                         WHERE t.id = ? AND b.curso_id = ?"
+                    );
+                    $stmtAgregarMaterial->bind_param(
+                        'ssii',
+                        $nombreMaterial,
+                        $urlMaterial,
+                        $temaObjetivo,
+                        $cursoObjetivo
+                    );
+                    $stmtAgregarMaterial->execute();
+                    if ($stmtAgregarMaterial->affected_rows !== 1) {
+                        http_response_code(403);
+                        $mensajeAccion = 'El tema no pertenece a este curso.';
+                    } else {
+                        $_SESSION['flash_message'] = 'Enlace de material agregado al tema.';
+                        header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                        exit;
+                    }
+                }
+            } elseif ($accion === 'actualizar_material') {
+                $materialObjetivo = filter_var($_POST['material_id'] ?? null, FILTER_VALIDATE_INT);
+                $nombreEntrada = $_POST['nombre'] ?? '';
+                $urlEntrada = $_POST['url_externa'] ?? '';
+                $nombreMaterial = is_string($nombreEntrada) ? trim($nombreEntrada) : '';
+                $urlMaterial = is_string($urlEntrada) ? trim($urlEntrada) : '';
+                $partesUrlMaterial = $urlMaterial !== '' && filter_var($urlMaterial, FILTER_VALIDATE_URL)
+                    ? parse_url($urlMaterial)
+                    : ($urlMaterial === '' ? null : false);
+                if (
+                    $materialObjetivo === false
+                    || $materialObjetivo < 1
+                    || $nombreMaterial === ''
+                    || strlen($nombreMaterial) > 255
+                    || strlen($urlMaterial) > 2048
+                    || ($urlMaterial !== '' && (
+                        $partesUrlMaterial === false
+                        || !in_array(strtolower($partesUrlMaterial['scheme'] ?? ''), ['http', 'https'], true)
+                        || empty($partesUrlMaterial['host'])
+                    ))
+                ) {
+                    $mensajeAccion = 'Indica un nombre y, si proporcionas un enlace, debe comenzar con http:// o https://.';
+                } else {
+                    $stmtActualizarMaterial = $db->prepare(
+                        "UPDATE materiales material
+                         JOIN temas tema ON tema.id = material.tema_id
+                         JOIN bloques bloque ON bloque.id = tema.bloque_id
+                         SET material.nombre = ?,
+                             material.tipo = CASE WHEN ? <> '' THEN 'Enlace' ELSE material.tipo END,
+                             material.url_externa = NULLIF(?, ''),
+                             material.url_archivo = CASE
+                                 WHEN ? <> '' THEN NULL ELSE material.url_archivo
+                             END
+                         WHERE material.id = ? AND bloque.curso_id = ?"
+                    );
+                    $stmtActualizarMaterial->bind_param(
+                        'ssssii',
+                        $nombreMaterial,
+                        $urlMaterial,
+                        $urlMaterial,
+                        $urlMaterial,
+                        $materialObjetivo,
+                        $cursoObjetivo
+                    );
+                    $stmtActualizarMaterial->execute();
+                    if ($stmtActualizarMaterial->affected_rows === 0) {
+                        $stmtMaterialExiste = $db->prepare(
+                            'SELECT material.id
+                             FROM materiales material
+                             JOIN temas tema ON tema.id = material.tema_id
+                             JOIN bloques bloque ON bloque.id = tema.bloque_id
+                             WHERE material.id = ? AND bloque.curso_id = ?'
+                        );
+                        $stmtMaterialExiste->bind_param('ii', $materialObjetivo, $cursoObjetivo);
+                        $stmtMaterialExiste->execute();
+                        if (!$stmtMaterialExiste->get_result()->fetch_assoc()) {
+                            http_response_code(404);
+                            $mensajeAccion = 'El material no existe o no pertenece a este curso.';
+                        } else {
+                            $_SESSION['flash_message'] = 'Material actualizado correctamente.';
+                            header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                            exit;
+                        }
+                    } else {
+                        $_SESSION['flash_message'] = 'Material actualizado correctamente.';
+                        header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
+                        exit;
+                    }
+                }
+            } elseif ($accion === 'eliminar_material') {
+                $materialObjetivo = filter_var($_POST['material_id'] ?? null, FILTER_VALIDATE_INT);
+                if ($materialObjetivo === false || $materialObjetivo < 1) {
+                    $mensajeAccion = 'No se pudo validar el material seleccionado.';
+                } else {
+                    $stmtEliminarMaterial = $db->prepare(
+                        'DELETE material
+                         FROM materiales material
+                         JOIN temas tema ON tema.id = material.tema_id
+                         JOIN bloques bloque ON bloque.id = tema.bloque_id
+                         WHERE material.id = ? AND bloque.curso_id = ?'
+                    );
+                    $stmtEliminarMaterial->bind_param('ii', $materialObjetivo, $cursoObjetivo);
+                    $stmtEliminarMaterial->execute();
+                    if ($stmtEliminarMaterial->affected_rows !== 1) {
+                        http_response_code(404);
+                        $mensajeAccion = 'El material no existe o no pertenece a este curso.';
+                    } else {
+                        $_SESSION['flash_message'] = 'Material eliminado del tema.';
                         header('Location: dashboard.php?seccion=editar_temario&id=' . $cursoObjetivo);
                         exit;
                     }
@@ -386,6 +1450,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmtCalificar = $db->prepare(
                         "UPDATE entregas_tareas e
                          JOIN tareas t ON t.id = e.tarea_id
+                         JOIN usuarios alumno ON alumno.id = e.usuario_id AND alumno.estado = 'Activo'
                          SET e.calificacion = ?
                          WHERE e.id = ? AND t.curso_id = ? AND e.calificacion IS NULL"
                     );
@@ -397,99 +1462,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $_SESSION['flash_message'] = 'Calificación guardada correctamente.';
                         header('Location: dashboard.php?seccion=calificar_entregas&id=' . $cursoObjetivo);
                         exit;
-                    }
-                }
-            }
-        } elseif ($accion === 'actualizar_progreso_tema' && $esAlumno) {
-            $cursoObjetivo = filter_var($_POST['curso_id'] ?? null, FILTER_VALIDATE_INT);
-            $temaObjetivo = filter_var($_POST['tema_id'] ?? null, FILTER_VALIDATE_INT);
-            $completado = ($_POST['completado'] ?? '') === '1';
-
-            if ($cursoObjetivo === false || $temaObjetivo === false) {
-                $mensajeAccion = 'No se pudo validar el tema seleccionado.';
-            } else {
-                $stmtValidacion = $db->prepare(
-                    'SELECT
-                        EXISTS(
-                            SELECT 1 FROM matriculas
-                            WHERE curso_id = ? AND usuario_id = ?
-                        ) AS matricula_valida,
-                        EXISTS(
-                            SELECT 1
-                            FROM temas t
-                            JOIN bloques b ON b.id = t.bloque_id
-                            WHERE t.id = ? AND b.curso_id = ?
-                        ) AS tema_valido'
-                );
-                $stmtValidacion->bind_param(
-                    'iiii',
-                    $cursoObjetivo,
-                    $usuario_id,
-                    $temaObjetivo,
-                    $cursoObjetivo
-                );
-                $stmtValidacion->execute();
-                $resultadoValidacion = $stmtValidacion->get_result();
-                $validacion = $resultadoValidacion->fetch_assoc();
-                $resultadoValidacion->free();
-                $stmtValidacion->close();
-                $matriculaValida = (bool)$validacion['matricula_valida'];
-                $temaValido = (bool)$validacion['tema_valido'];
-
-                if (!$matriculaValida || !$temaValido) {
-                    http_response_code(403);
-                    $mensajeAccion = 'No tienes permiso para modificar el avance de este tema.';
-                } else {
-                    try {
-                        $db->begin_transaction();
-
-                        if ($completado) {
-                            $stmtCompletar = $db->prepare(
-                                'INSERT IGNORE INTO progreso_temas (usuario_id, tema_id) VALUES (?, ?)'
-                            );
-                            $stmtCompletar->bind_param('ii', $usuario_id, $temaObjetivo);
-                            $stmtCompletar->execute();
-                        } else {
-                            $stmtDesmarcar = $db->prepare(
-                                'DELETE FROM progreso_temas WHERE usuario_id = ? AND tema_id = ?'
-                            );
-                            $stmtDesmarcar->bind_param('ii', $usuario_id, $temaObjetivo);
-                            $stmtDesmarcar->execute();
-                        }
-
-                        $stmtAvance = $db->prepare(
-                            "UPDATE matriculas m
-                             SET progreso_global = (
-                                SELECT CASE WHEN COUNT(DISTINCT t.id) = 0 THEN 0
-                                    ELSE ROUND(COUNT(DISTINCT pt.tema_id) * 100 / COUNT(DISTINCT t.id), 2)
-                                END
-                                FROM cursos c
-                                LEFT JOIN bloques b ON b.curso_id = c.id
-                                LEFT JOIN temas t ON t.bloque_id = b.id
-                                LEFT JOIN progreso_temas pt
-                                  ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
-                                WHERE c.id = m.curso_id
-                             )
-                             WHERE m.usuario_id = ? AND m.curso_id = ?"
-                        );
-                        $stmtAvance->bind_param('ii', $usuario_id, $cursoObjetivo);
-                        $stmtAvance->execute();
-                        $db->commit();
-
-                        $_SESSION['flash_message'] = 'Tu avance se guardó.';
-                        header('Location: dashboard.php?seccion=curso_detalle&id=' . $cursoObjetivo);
-                        exit;
-                    } catch (mysqli_sql_exception $exception) {
-                        $db->rollback();
-                        error_log(
-                            'Error al actualizar progreso del alumno '
-                            . $usuario_id
-                            . ' en el curso '
-                            . $cursoObjetivo
-                            . ': '
-                            . $exception->getMessage()
-                        );
-                        $mensajeAccion = 'No se pudo guardar tu avance. Inténtalo de nuevo y, si el problema continúa, contacta al administrador.';
                     }
                 }
             }
@@ -547,8 +1519,7 @@ if (($esSuperadmin || $esDirector) && $seccion === 'inicio') {
 // ==========================================
 $metricas_alumno = [
     'cursos_progreso' => 0,
-    'cursos_completados' => 0,
-    'proxima_tarea' => 'No tienes tareas pendientes'
+    'cursos_completados' => 0
 ];
 
 if ($esAlumno && $seccion === 'inicio') {
@@ -565,11 +1536,13 @@ if ($esAlumno && $seccion === 'inicio') {
                    COUNT(DISTINCT t.id) AS total_temas,
                    COUNT(DISTINCT pt.tema_id) AS temas_completados
             FROM matriculas m
+            JOIN cursos curso ON curso.id = m.curso_id
+            JOIN usuarios ponente ON ponente.id = curso.docente_id AND ponente.estado = 'Activo'
             LEFT JOIN bloques b ON b.curso_id = m.curso_id
             LEFT JOIN temas t ON t.bloque_id = b.id
             LEFT JOIN progreso_temas pt
               ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
-            WHERE m.usuario_id = ?
+            WHERE m.usuario_id = ? AND curso.estado = 'Publicado'
             GROUP BY m.curso_id
          ) AS avance"
     );
@@ -582,21 +1555,6 @@ if ($esAlumno && $seccion === 'inicio') {
         $metricas_alumno['cursos_completados'] = (int)($resMet['completados'] ?? 0);
     }
 
-    $stmtT = $db->prepare("SELECT t.titulo, t.fecha_limite, c.titulo as curso
-        FROM tareas t
-        JOIN matriculas m ON t.curso_id = m.curso_id
-        JOIN cursos c ON t.curso_id = c.id
-        LEFT JOIN entregas_tareas e ON t.id = e.tarea_id AND e.usuario_id = m.usuario_id
-        WHERE m.usuario_id = ? AND e.id IS NULL
-        ORDER BY t.fecha_limite ASC
-        LIMIT 1");
-    $stmtT->bind_param("i", $usuario_id);
-    $stmtT->execute();
-    $resT = $stmtT->get_result()->fetch_assoc();
-
-    if ($resT) {
-        $metricas_alumno['proxima_tarea'] = $resT['titulo'];
-    }
 }
 
 // ==========================================
@@ -605,24 +1563,84 @@ if ($esAlumno && $seccion === 'inicio') {
 $metricas_ponente = [
     'cursos_activos' => 0,
     'total_alumnos' => 0,
-    'tareas_pendientes' => 0
+    'revisiones_pendientes' => 0,
+    'avance_promedio' => 0.0
 ];
+$cursos_dashboard_ponente = [];
 
 if ($esPonente && $seccion === 'inicio') {
-    $stmtCA = $db->prepare("SELECT COUNT(*) FROM cursos WHERE docente_id = ? AND estado = 'Publicado'");
+    $stmtCA = $db->prepare("SELECT COUNT(*) FROM cursos c JOIN usuarios ponente ON ponente.id = c.docente_id AND ponente.estado = 'Activo' WHERE c.docente_id = ? AND c.estado = 'Publicado'");
     $stmtCA->bind_param("i", $usuario_id);
     $stmtCA->execute();
     $metricas_ponente['cursos_activos'] = (int)$stmtCA->get_result()->fetch_row()[0];
 
-    $stmtTA = $db->prepare("SELECT COUNT(DISTINCT m.usuario_id) FROM matriculas m JOIN cursos c ON m.curso_id = c.id WHERE c.docente_id = ?");
+    $stmtTA = $db->prepare("SELECT COUNT(DISTINCT m.usuario_id) FROM matriculas m JOIN usuarios alumno ON alumno.id = m.usuario_id AND alumno.estado = 'Activo' JOIN cursos c ON m.curso_id = c.id JOIN usuarios ponente ON ponente.id = c.docente_id AND ponente.estado = 'Activo' WHERE c.docente_id = ?");
     $stmtTA->bind_param("i", $usuario_id);
     $stmtTA->execute();
     $metricas_ponente['total_alumnos'] = (int)$stmtTA->get_result()->fetch_row()[0];
 
-    $stmtTP = $db->prepare("SELECT COUNT(*) FROM entregas_tareas e JOIN tareas t ON e.tarea_id = t.id JOIN cursos c ON t.curso_id = c.id WHERE c.docente_id = ? AND e.calificacion IS NULL");
-    $stmtTP->bind_param("i", $usuario_id);
-    $stmtTP->execute();
-    $metricas_ponente['tareas_pendientes'] = (int)$stmtTP->get_result()->fetch_row()[0];
+    $stmtRevisionesPendientes = $db->prepare(
+        "SELECT COUNT(*) FROM revisiones_temas revision
+         JOIN usuarios alumno ON alumno.id = revision.usuario_id AND alumno.estado = 'Activo'
+         JOIN temas tema ON tema.id = revision.tema_id
+         JOIN bloques bloque ON bloque.id = tema.bloque_id
+         JOIN cursos curso ON curso.id = bloque.curso_id
+             AND curso.docente_id = revision.ponente_id
+         WHERE revision.ponente_id = ? AND revision.estado = 'pendiente'"
+    );
+    $stmtRevisionesPendientes->bind_param('i', $usuario_id);
+    $stmtRevisionesPendientes->execute();
+    $metricas_ponente['revisiones_pendientes'] = (int)$stmtRevisionesPendientes->get_result()->fetch_row()[0];
+
+    $stmtAvancePonente = $db->prepare(
+        "SELECT COALESCE(ROUND(AVG(avance.porcentaje), 1), 0) AS avance_promedio
+         FROM (
+            SELECT m.usuario_id, m.curso_id,
+                   CASE WHEN COUNT(DISTINCT t.id) = 0 THEN 0
+                        ELSE COUNT(DISTINCT pt.tema_id) * 100 / COUNT(DISTINCT t.id)
+                   END AS porcentaje
+            FROM cursos c
+            JOIN matriculas m ON m.curso_id = c.id
+            JOIN usuarios alumno ON alumno.id = m.usuario_id AND alumno.estado = 'Activo'
+            JOIN usuarios ponente ON ponente.id = c.docente_id AND ponente.estado = 'Activo'
+            LEFT JOIN bloques b ON b.curso_id = c.id
+            LEFT JOIN temas t ON t.bloque_id = b.id
+            LEFT JOIN progreso_temas pt
+              ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
+            WHERE c.docente_id = ?
+            GROUP BY m.usuario_id, m.curso_id
+         ) AS avance"
+    );
+    $stmtAvancePonente->bind_param('i', $usuario_id);
+    $stmtAvancePonente->execute();
+    $resultadoAvancePonente = $stmtAvancePonente->get_result()->fetch_assoc();
+    $metricas_ponente['avance_promedio'] = (float)($resultadoAvancePonente['avance_promedio'] ?? 0);
+
+    $stmtCursosPonente = $db->prepare(
+        "SELECT c.id, c.titulo, c.estado,
+                (SELECT COUNT(*) FROM matriculas m
+                 JOIN usuarios alumno ON alumno.id = m.usuario_id AND alumno.estado = 'Activo'
+                 WHERE m.curso_id = c.id) AS alumnos,
+                (SELECT COUNT(*)
+                 FROM revisiones_temas revision
+                 JOIN usuarios alumno ON alumno.id = revision.usuario_id AND alumno.estado = 'Activo'
+                 JOIN temas tema ON tema.id = revision.tema_id
+                 JOIN bloques bloque ON bloque.id = tema.bloque_id
+                 WHERE bloque.curso_id = c.id
+                   AND revision.ponente_id = c.docente_id
+                   AND revision.estado = 'pendiente') AS revisiones_pendientes
+         FROM cursos c
+         WHERE c.docente_id = ?
+         ORDER BY c.created_at DESC, c.id DESC
+         LIMIT 5"
+    );
+    $stmtCursosPonente->bind_param('i', $usuario_id);
+    $stmtCursosPonente->execute();
+    $resultadoCursosPonente = $stmtCursosPonente->get_result();
+    while ($cursoPonente = $resultadoCursosPonente->fetch_assoc()) {
+        $cursos_dashboard_ponente[] = $cursoPonente;
+    }
+
 }
 
 $stmtP = $db->prepare('SELECT email FROM usuarios WHERE id = ?');
@@ -1202,6 +2220,18 @@ if ($esSuperadmin) {
                     <?php if ($esSuperadmin): ?>
                         <!-- 1. Menú de Navegación Lateral Superadmin -->
                         <li>
+                            <a href="dashboard.php?seccion=postulaciones_superadmins" class="sidebar-link <?= ($seccion === 'postulaciones_superadmins') ? 'active' : '' ?>">
+                                <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9v-1c0-3.31 3.13-6 7-6h2c3.87 0 7 2.69 7 6v1H4zm16-14h-2V5h2V3h2v2h2v2h-2v2h-2V7z"/></svg>
+                                Postulaciones de Superadmins
+                            </a>
+                        </li>
+                        <li>
+                            <a href="dashboard.php?seccion=postulaciones_directores" class="sidebar-link <?= ($seccion === 'postulaciones_directores') ? 'active' : '' ?>">
+                                <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9v-1c0-3.31 3.13-6 7-6h2c3.87 0 7 2.69 7 6v1H4zm16-14h-2V5h2V3h2v2h2v2h-2v2h-2V7z"/></svg>
+                                Postulaciones de Directores
+                            </a>
+                        </li>
+                        <li>
                             <a href="dashboard.php?seccion=usuarios" class="sidebar-link <?= ($seccion === 'usuarios') ? 'active' : '' ?>">
                                 <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
                                 Gestión de Usuarios
@@ -1221,6 +2251,12 @@ if ($esSuperadmin) {
                             <a href="dashboard.php?seccion=supervision_usuarios" class="sidebar-link <?= ($seccion === 'supervision_usuarios') ? 'active' : '' ?>">
                                 <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
                                 Supervisión de Usuarios
+                            </a>
+                        </li>
+                        <li>
+                            <a href="dashboard.php?seccion=postulaciones_ponentes" class="sidebar-link <?= ($seccion === 'postulaciones_ponentes') ? 'active' : '' ?>">
+                                <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9v-1c0-3.31 3.13-6 7-6h2c3.87 0 7 2.69 7 6v1H4zm16-14h-2V5h2V3h2v2h2v2h-2v2h-2V7z"/></svg>
+                                Postulaciones de Ponentes
                             </a>
                         </li>
                         <li>
@@ -1251,12 +2287,19 @@ if ($esSuperadmin) {
                             </a>
                         </li>
 
+                        <li>
+                            <a href="dashboard.php?seccion=revisiones_temas" class="sidebar-link <?= ($seccion === 'revisiones_temas') ? 'active' : '' ?>">
+                                <svg viewBox="0 0 24 24"><path d="m9 16.17-4.17-4.17-1.42 1.41L9 19l12-12-1.41-1.41zM19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14z"/></svg>
+                                Revisar Temas
+                            </a>
+                        </li>
+
                     <?php elseif ($esAlumno): ?>
                         <!-- Sidebar para Alumno -->
                         <li>
                             <a href="dashboard.php?seccion=cursos" class="sidebar-link <?= ($seccion === 'cursos' || $seccion === 'curso_detalle') ? 'active' : '' ?>">
                                 <svg viewBox="0 0 24 24"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/></svg>
-                                Mis Cursos
+                                Explorar Cursos
                             </a>
                         </li>
                     <?php endif; ?>
@@ -1312,6 +2355,24 @@ if ($esSuperadmin) {
                     require __DIR__ . '/vistas/supervision_usuarios.php';
                     break;
 
+                case 'postulaciones_ponentes':
+                    if ($esDirector) {
+                        require __DIR__ . '/vistas/postulaciones_ponentes.php';
+                    }
+                    break;
+
+                case 'postulaciones_directores':
+                    if ($esSuperadmin) {
+                        require __DIR__ . '/vistas/postulaciones_directores.php';
+                    }
+                    break;
+
+                case 'postulaciones_superadmins':
+                    if ($esSuperadmin) {
+                        require __DIR__ . '/vistas/postulaciones_superadmins.php';
+                    }
+                    break;
+
                 case 'reportes':
                     require __DIR__ . '/vistas/reportes_academicos.php';
                     break;
@@ -1329,6 +2390,12 @@ if ($esSuperadmin) {
                 case 'mis_alumnos':
                     if ($esPonente) {
                         require __DIR__ . '/vistas/mis_alumnos.php';
+                    }
+                    break;
+
+                case 'revisiones_temas':
+                    if ($esPonente) {
+                        require __DIR__ . '/vistas/revisiones_temas.php';
                     }
                     break;
 
@@ -1549,17 +2616,7 @@ if ($esSuperadmin) {
                                     </div>
                                 </article>
 
-                                <article class="summary-card">
-                                    <div class="card-icon-wrapper icon-orange">
-                                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                                    </div>
-                                    <div class="card-data">
-                                        <span class="card-label">Próxima Tarea</span>
-                                        <span style="font-size: 16px; font-weight: 800; color: var(--color-charcoal); line-height: 1.25; margin-top: 4px;">
-                                            <?= htmlspecialchars($metricas_alumno['proxima_tarea']) ?>
-                                        </span>
-                                    </div>
-                                </article>
+
                             </div>
                         </section>
 
@@ -1575,9 +2632,9 @@ if ($esSuperadmin) {
                             </a>
                         </div>
 
-                        <section aria-label="Resumen de Docencia">
+                        <section aria-label="Resumen de Docencia" style="margin-top: 24px;">
                             <h3 style="font-size: 18px; font-weight: 800; color: var(--color-charcoal); margin-bottom: 14px;">Resumen de Docencia</h3>
-                            
+
                             <div class="widgets-grid">
                                 <article class="summary-card">
                                     <div class="card-icon-wrapper icon-green">
@@ -1600,16 +2657,71 @@ if ($esSuperadmin) {
                                 </article>
 
                                 <article class="summary-card">
-                                    <div class="card-icon-wrapper icon-orange">
-                                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                                    <div class="card-icon-wrapper icon-dark">
+                                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
                                     </div>
                                     <div class="card-data">
-                                        <span class="card-label">Tareas Pendientes de Revisión</span>
-                                        <span class="card-value"><?= $metricas_ponente['tareas_pendientes'] ?></span>
+                                        <span class="card-label">Avance Promedio de Alumnos</span>
+                                        <span class="card-value"><?= number_format($metricas_ponente['avance_promedio'], 1) ?>%</span>
+                                    </div>
+                                </article>
+
+                                <article class="summary-card">
+                                    <div class="card-icon-wrapper icon-orange">
+                                        <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2zm1 15h-2v-2h2zm0-4h-2V7h2z"/></svg>
+                                    </div>
+                                    <div class="card-data">
+                                        <span class="card-label">Temas por Revisar</span>
+                                        <span class="card-value"><?= $metricas_ponente['revisiones_pendientes'] ?></span>
+                                        <a href="dashboard.php?seccion=revisiones_temas" style="color: var(--color-spark-blue); font-size: 13px; font-weight: 800;">Abrir bandeja</a>
                                     </div>
                                 </article>
                             </div>
                         </section>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 24px; margin-top: 28px;">
+                            <section class="summary-card" style="display: block; padding: 24px;" aria-labelledby="cursos-ponente-heading">
+                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
+                                    <div>
+                                        <h3 id="cursos-ponente-heading" style="font-size: 18px; font-weight: 900; color: var(--color-charcoal);">Mis Cursos</h3>
+                                        <p style="font-size: 13px; color: var(--color-pencil-gray); margin-top: 4px;">Actividad reciente de tus cursos.</p>
+                                    </div>
+                                    <a href="dashboard.php?seccion=cursos" class="action-btn" style="white-space: nowrap;">Ver todos</a>
+                                </div>
+
+                                <?php if (empty($cursos_dashboard_ponente)): ?>
+                                    <p style="color: var(--color-pencil-gray); font-size: 14px;">Todavía no tienes cursos registrados.</p>
+                                <?php else: ?>
+                                    <div style="overflow-x: auto;">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Curso</th>
+                                                    <th>Estado</th>
+                                                    <th style="text-align: center;">Alumnos</th>
+                                                    <th style="text-align: center;">Por revisar</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($cursos_dashboard_ponente as $cursoPonente): ?>
+                                                    <tr>
+                                                        <td>
+                                                            <a href="dashboard.php?seccion=editar_temario&amp;id=<?= (int)$cursoPonente['id'] ?>" style="font-weight: 700; color: var(--color-charcoal); text-decoration: none;">
+                                                                <?= htmlspecialchars($cursoPonente['titulo']) ?>
+                                                            </a>
+                                                        </td>
+                                                        <td><?= htmlspecialchars($cursoPonente['estado']) ?></td>
+                                                        <td style="text-align: center;"><?= (int)$cursoPonente['alumnos'] ?></td>
+                                                        <td style="text-align: center;"><?= (int)$cursoPonente['revisiones_pendientes'] ?></td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                <?php endif; ?>
+                            </section>
+
+                        </div>
                     <?php endif; ?>
                     <?php
                     break;

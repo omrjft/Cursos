@@ -8,7 +8,7 @@ $esAlumno = ($rol_id === 3);
 $cursoId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 // 1. Obtener información del curso
-$stmtCurso = $conexion->prepare("SELECT c.id, c.titulo, c.descripcion, COALESCE(u.nombre, 'Sin asignar') AS docente FROM cursos c LEFT JOIN usuarios u ON c.docente_id = u.id WHERE c.id = ?");
+$stmtCurso = $conexion->prepare("SELECT c.id, c.titulo, c.descripcion, c.estado, COALESCE(u.nombre, 'Sin asignar') AS docente, u.estado AS docente_estado FROM cursos c LEFT JOIN usuarios u ON c.docente_id = u.id AND u.estado = 'Activo' WHERE c.id = ?");
 $stmtCurso->bind_param("i", $cursoId);
 $stmtCurso->execute();
 $curso = $stmtCurso->get_result()->fetch_assoc();
@@ -17,17 +17,22 @@ if (!$curso) {
     echo "<section><h2>Curso no disponible</h2><p>No se encontró el curso solicitado en la base de datos.</p></section>";
     return;
 }
+if ($esAlumno && ($curso['docente_estado'] !== 'Activo' || $curso['estado'] !== 'Publicado')) {
+    http_response_code(404);
+    echo "<section><h2>Curso no disponible</h2><p>El curso no está disponible actualmente.</p></section>";
+    return;
+}
 
 // 2. Obtener progreso de matrícula si es alumno
 $progresoAlumno = 0.0;
-$puedeMarcarProgreso = false;
+$puedeSolicitarRevision = false;
 if ($esAlumno) {
     $stmtMat = $conexion->prepare("SELECT 1 FROM matriculas WHERE usuario_id = ? AND curso_id = ?");
     $stmtMat->bind_param("ii", $usuario_id, $cursoId);
     $stmtMat->execute();
     $mat = $stmtMat->get_result()->fetch_assoc();
     if ($mat) {
-        $puedeMarcarProgreso = true;
+        $puedeSolicitarRevision = true;
 
         $stmtAvance = $conexion->prepare(
             "SELECT COUNT(DISTINCT t.id) AS total_temas,
@@ -50,6 +55,25 @@ if ($esAlumno) {
 }
 
 // 3. Obtener Bloques y Temas interactivos
+$revisionesPorTema = [];
+if ($puedeSolicitarRevision) {
+    $stmtHistorial = $conexion->prepare(
+        'SELECT r.id, r.tema_id, r.estado, r.calificacion, r.observacion, r.entregable_url,
+                r.solicitado_en, r.revisado_en
+         FROM revisiones_temas r
+         JOIN temas t ON t.id = r.tema_id
+         JOIN bloques b ON b.id = t.bloque_id
+         WHERE r.usuario_id = ? AND b.curso_id = ?
+         ORDER BY r.tema_id, r.id'
+    );
+    $stmtHistorial->bind_param("ii", $usuario_id, $cursoId);
+    $stmtHistorial->execute();
+    $resHistorial = $stmtHistorial->get_result();
+    while ($revision = $resHistorial->fetch_assoc()) {
+        $revisionesPorTema[(int)$revision['tema_id']][] = $revision;
+    }
+}
+
 $bloques = [];
 $stmtB = $conexion->prepare("SELECT id, titulo FROM bloques WHERE curso_id = ? ORDER BY orden ASC");
 $stmtB->bind_param("i", $cursoId);
@@ -58,7 +82,7 @@ $resB = $stmtB->get_result();
 
 while ($b = $resB->fetch_assoc()) {
     $stmtT = $conexion->prepare(
-        "SELECT t.id, t.titulo, (pt.tema_id IS NOT NULL) AS completado
+        "SELECT t.id, t.titulo, t.descripcion, (pt.tema_id IS NOT NULL) AS completado
          FROM temas t
          LEFT JOIN progreso_temas pt
            ON pt.tema_id = t.id AND pt.usuario_id = ?
@@ -70,6 +94,12 @@ while ($b = $resB->fetch_assoc()) {
     $resT = $stmtT->get_result();
     $temas = [];
     while ($t = $resT->fetch_assoc()) {
+        $historial = $revisionesPorTema[(int)$t['id']] ?? [];
+        $ultimaRevision = empty($historial) ? null : $historial[count($historial) - 1];
+        $t['revision_historial'] = $historial;
+        $t['revision_estado'] = $ultimaRevision['estado'] ?? null;
+        $t['revision_calificacion'] = $ultimaRevision['calificacion'] ?? null;
+        $t['revision_observacion'] = $ultimaRevision['observacion'] ?? null;
         $temas[] = $t;
     }
     $b['temas'] = $temas;
@@ -77,37 +107,18 @@ while ($b = $resB->fetch_assoc()) {
 }
 
 // 4. Materiales de Apoyo
-$materiales = [];
-$stmtM = $conexion->prepare("SELECT m.id, m.nombre, m.url_archivo, m.tipo 
+$materialesPorTema = [];
+$stmtM = $conexion->prepare("SELECT m.id, m.tema_id, m.nombre, m.url_archivo, m.url_externa, m.tipo
     FROM materiales m 
     JOIN temas t ON m.tema_id = t.id 
     JOIN bloques b ON t.bloque_id = b.id 
-    WHERE b.curso_id = ?");
+    WHERE b.curso_id = ?
+    ORDER BY t.orden, m.id");
 $stmtM->bind_param("i", $cursoId);
 $stmtM->execute();
 $resM = $stmtM->get_result();
 while ($m = $resM->fetch_assoc()) {
-    $materiales[] = $m;
-}
-
-// 5. Panel de Tareas y Asignaciones
-$tareas = [];
-$stmtTar = $conexion->prepare("SELECT t.id, t.titulo, t.descripcion, t.fecha_limite, e.calificacion, e.fecha_entrega, e.archivo_url
-    FROM tareas t
-    LEFT JOIN entregas_tareas e ON t.id = e.tarea_id AND e.usuario_id = ?
-    WHERE t.curso_id = ?
-    ORDER BY t.fecha_limite ASC");
-$stmtTar->bind_param("ii", $usuario_id, $cursoId);
-$stmtTar->execute();
-$resTar = $stmtTar->get_result();
-
-while ($tar = $resTar->fetch_assoc()) {
-    $estado = 'Pendiente';
-    if ($tar['fecha_entrega'] !== null) {
-        $estado = ($tar['calificacion'] !== null) ? 'Calificado' : 'Entregado';
-    }
-    $tar['estado'] = $estado;
-    $tareas[] = $tar;
+    $materialesPorTema[(int)$m['tema_id']][] = $m;
 }
 
 ?>
@@ -142,18 +153,18 @@ while ($tar = $resTar->fetch_assoc()) {
         </div>
     </div>
 
-    <!-- Contenido en 2 Columnas: Temario Interactivo a la izquierda, Materiales y Tareas a la derecha -->
-    <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 28px; align-items: start;">
+    <!-- Temario, detalles y materiales del curso -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-items: start;">
 
-        <!-- 1. TEMARIO INTERACTIVO (Modo Alumno con Checkboxes) -->
+        <!-- Temario interactivo -->
         <section class="summary-card" style="display: block; padding: 28px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid var(--color-border-gray); padding-bottom: 12px;">
                 <h3 style="font-size: 20px; font-weight: 900; color: var(--color-charcoal);">Temario Interactivo</h3>
-                <span style="font-size: 12px; font-weight: 700; color: var(--color-pencil-gray);">Marca los temas completados</span>
+                <span style="font-size: 12px; font-weight: 700; color: var(--color-pencil-gray);">El ponente revisa el avance</span>
             </div>
 
             <p style="font-size: 14px; color: var(--color-pencil-gray); margin-bottom: 20px;">
-                <?= $puedeMarcarProgreso ? 'Marca los temas completados para actualizar tu avance.' : 'Consulta los temas disponibles en este curso.' ?>
+                <?= $puedeSolicitarRevision ? 'Solicita la revisión de cada tema. Tu avance aumentará cuando el ponente lo apruebe con una calificación de 7 o más.' : 'Consulta los temas disponibles en este curso.' ?>
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 20px;">
@@ -172,23 +183,106 @@ while ($tar = $resTar->fetch_assoc()) {
                         <ul style="list-style: none; display: flex; flex-direction: column; gap: 10px; padding-left: 6px;">
                             <?php foreach ($bloque['temas'] as $tema): ?>
                                 <?php $temaCompletado = (bool)$tema['completado']; ?>
+                                <?php $estadoRevision = $tema['revision_estado'] ?? null; ?>
                                 <li>
-                                    <?php if ($puedeMarcarProgreso): ?>
-                                        <form method="POST" action="dashboard.php?seccion=curso_detalle&amp;id=<?= $cursoId ?>">
-                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
-                                            <input type="hidden" name="accion" value="actualizar_progreso_tema">
-                                            <input type="hidden" name="curso_id" value="<?= $cursoId ?>">
-                                            <input type="hidden" name="tema_id" value="<?= (int)$tema['id'] ?>">
-                                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--color-charcoal); user-select: none;">
-                                                <input type="checkbox" name="completado" value="1" <?= $temaCompletado ? 'checked' : '' ?> onchange="this.form.submit()" style="width: 18px; height: 18px; accent-color: var(--color-eager-green); cursor: pointer;">
-                                                <span style="<?= $temaCompletado ? 'text-decoration: line-through; color: var(--color-pencil-gray);' : '' ?>">
-                                                    <?= htmlspecialchars($tema['titulo']) ?>
-                                                </span>
-                                            </label>
-                                        </form>
-                                    <?php else: ?>
-                                        <span style="font-size: 14px; color: var(--color-charcoal);"><?= htmlspecialchars($tema['titulo']) ?></span>
+                                    <details style="border: 1px solid var(--color-border-gray); border-radius: var(--radius-btn); background: var(--color-paper-white);">
+                                        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; cursor: pointer; list-style-position: inside;">
+                                            <strong style="font-size: 14px; color: var(--color-charcoal); <?= $temaCompletado ? 'text-decoration: line-through; color: var(--color-pencil-gray);' : '' ?>">
+                                                <?= htmlspecialchars($tema['titulo']) ?>
+                                            </strong>
+                                            <?php if ($temaCompletado): ?>
+                                                <span style="color: #2e7a00; font-size: 12px; font-weight: 800; white-space: nowrap;">Aprobado</span>
+                                            <?php elseif ($estadoRevision === 'pendiente'): ?>
+                                                <span style="color: #d97706; font-size: 12px; font-weight: 800; white-space: nowrap;">Pendiente</span>
+                                            <?php elseif ($estadoRevision === 'requiere_correccion'): ?>
+                                                <span style="color: #b42318; font-size: 12px; font-weight: 800; white-space: nowrap;">Requiere corrección</span>
+                                            <?php elseif ($puedeSolicitarRevision): ?>
+                                                <span style="color: var(--color-pencil-gray); font-size: 12px; font-weight: 800; white-space: nowrap;">Disponible para revisión</span>
+                                            <?php endif; ?>
+                                        </summary>
+                                        <div style="padding: 0 14px 14px;">
+                                            <section aria-label="Detalles del tema">
+                                                <?php if (!empty($tema['descripcion'])): ?>
+                                                    <div style="margin-top: 8px; padding: 10px 12px; border-left: 3px solid var(--color-spark-blue); background: var(--color-paper-white); border-radius: 0 var(--radius-btn) var(--radius-btn) 0;">
+                                                        <strong style="display: block; font-size: 11px; color: var(--color-pencil-gray); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">Descripción</strong>
+                                                        <p style="font-size: 13px; color: var(--color-charcoal); margin: 0;">
+                                                            <?= nl2br(htmlspecialchars($tema['descripcion'])) ?>
+                                                        </p>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </section>
+
+                                        <?php if ($puedeSolicitarRevision && !$temaCompletado && $estadoRevision !== 'pendiente'): ?>
+                                            <form method="POST" action="dashboard.php?seccion=curso_detalle&amp;id=<?= $cursoId ?>" style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: min(100%, 220px);">
+                                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                <input type="hidden" name="accion" value="solicitar_revision_tema">
+                                                <input type="hidden" name="tema_id" value="<?= (int)$tema['id'] ?>">
+                                                <label style="width: 100%; font-size: 11px; font-weight: 800; color: var(--color-pencil-gray);">
+                                                    Link del entregable (opcional)
+                                                    <input type="url" name="entregable_url" maxlength="2048" placeholder="https://..." style="display: block; width: 100%; margin-top: 4px; padding: 8px; border: 1px solid var(--color-border-gray); border-radius: var(--radius-btn);">
+                                                </label>
+                                                <button type="submit" class="action-btn" style="white-space: nowrap; border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
+                                                    <?= $estadoRevision === 'requiere_correccion' ? 'Solicitar nueva revisión' : 'Solicitar revisión' ?>
+                                                </button>
+                                            </form>
+                                        <?php endif; ?>
+                                    <?php if ($puedeSolicitarRevision && !empty($tema['revision_historial'])): ?>
+                                        <ol aria-label="Historial de revisiones" style="list-style: none; margin: 12px 0 0; padding: 10px 12px; background: var(--color-paper-white); border: 1px solid var(--color-border-gray); border-radius: var(--radius-btn);">
+                                            <?php foreach ($tema['revision_historial'] as $numeroRevision => $revision): ?>
+                                                <li style="<?= $numeroRevision > 0 ? 'border-top: 1px solid var(--color-border-gray); margin-top: 10px; padding-top: 10px;' : '' ?>">
+                                                    <strong style="font-size: 12px; color: var(--color-charcoal);">
+                                                        Intento <?= $numeroRevision + 1 ?> · <?= htmlspecialchars(str_replace('_', ' ', ucfirst($revision['estado']))) ?>
+                                                    </strong>
+                                                    <?php if ($revision['calificacion'] !== null): ?>
+                                                        <span style="font-size: 12px; color: var(--color-pencil-gray);">
+                                                            · <?= number_format((float)$revision['calificacion'], 2) ?>/10
+                                                        </span>
+                                                    <?php endif; ?>
+                                                    <span style="display: block; font-size: 11px; color: var(--color-pencil-gray); margin-top: 3px;">
+                                                        Solicitada: <?= htmlspecialchars($revision['solicitado_en']) ?>
+                                                        <?php if ($revision['revisado_en'] !== null): ?>
+                                                            · Revisada: <?= htmlspecialchars($revision['revisado_en']) ?>
+                                                        <?php endif; ?>
+                                                    </span>
+                                                    <?php if ($revision['observacion'] !== null && $revision['observacion'] !== ''): ?>
+                                                        <span style="display: block; font-size: 13px; color: var(--color-charcoal); margin-top: 5px;">
+                                                            Observación: <?= nl2br(htmlspecialchars($revision['observacion'])) ?>
+                                                        </span>
+                                                    <?php endif; ?>
+                                                    <?php if (!empty($revision['entregable_url'])): ?>
+                                                        <a href="<?= htmlspecialchars($revision['entregable_url']) ?>" target="_blank" rel="noopener noreferrer" style="display: inline-block; font-size: 12px; color: var(--color-spark-blue); font-weight: 800; margin-top: 5px;">
+                                                            Ver entregable enviado ↗
+                                                        </a>
+                                                    <?php endif; ?>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ol>
                                     <?php endif; ?>
+                                    <?php if (!empty($materialesPorTema[(int)$tema['id']])): ?>
+                                        <section aria-label="Material de apoyo del tema <?= htmlspecialchars($tema['titulo']) ?>" style="margin-top: 10px;">
+                                            <strong style="display: block; font-size: 11px; color: var(--color-pencil-gray); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 5px;">Material de apoyo</strong>
+                                            <ul style="list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0;">
+                                                <?php foreach ($materialesPorTema[(int)$tema['id']] as $material): ?>
+                                                    <?php if (!empty($material['url_externa'])): ?>
+                                                        <li>
+                                                            <a href="<?= htmlspecialchars($material['url_externa']) ?>" target="_blank" rel="noopener noreferrer" aria-label="<?= htmlspecialchars(($material['nombre'] ?? 'Material de apoyo') . ' (se abre en una pestaña nueva)') ?>" class="action-btn" style="display: inline-flex; align-items: center; gap: 6px; color: var(--color-spark-blue); text-decoration: none;">
+                                                                <?= htmlspecialchars($material['nombre'] ?? 'Material de apoyo') ?>
+                                                                <span aria-hidden="true">↗</span>
+                                                            </a>
+                                                        </li>
+                                                    <?php elseif (!empty($material['url_archivo'])): ?>
+                                                        <li>
+                                                            <a href="<?= htmlspecialchars($material['url_archivo']) ?>" download="<?= htmlspecialchars($material['nombre'] ?? '') ?>" class="action-btn" style="display: inline-flex; color: var(--color-spark-blue); text-decoration: none;">
+                                                                <?= htmlspecialchars($material['nombre'] ?? 'Material de apoyo') ?>
+                                                            </a>
+                                                        </li>
+                                                    <?php endif; ?>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        </section>
+                                    <?php endif; ?>
+                                        </div>
+                                    </details>
                                 </li>
                             <?php endforeach; ?>
                         </ul>
@@ -197,104 +291,5 @@ while ($tar = $resTar->fetch_assoc()) {
             </div>
         </section>
 
-        <!-- Columna Derecha: Materiales de Apoyo y Panel de Tareas -->
-        <div style="display: flex; flex-direction: column; gap: 24px;">
-
-            <!-- 2. MATERIALES DE APOYO -->
-            <section class="summary-card" style="display: block; padding: 24px;">
-                <h3 style="font-size: 18px; font-weight: 900; color: var(--color-charcoal); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--color-spark-blue)"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                    Materiales de Apoyo
-                </h3>
-                <p style="font-size: 13px; color: var(--color-pencil-gray); margin-bottom: 16px;">
-                    Recursos y guías descargables proporcionadas por el docente para complementar tu aprendizaje.
-                </p>
-
-                <ul style="list-style: none; display: flex; flex-direction: column; gap: 10px;">
-                    <?php if (empty($materiales)): ?>
-                        <li style="color: var(--color-pencil-gray);">Este curso aún no tiene materiales registrados.</li>
-                    <?php endif; ?>
-                    <?php foreach ($materiales as $mat): ?>
-                        <li style="display: flex; align-items: center; justify-content: space-between; background-color: var(--color-bg-light); border: 1px solid var(--color-border-gray); padding: 10px 14px; border-radius: var(--radius-btn);">
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="#e74c3c"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                <span style="font-size: 14px; font-weight: 700; color: var(--color-charcoal);">
-                                    <?= htmlspecialchars($mat['nombre']) ?>
-                                </span>
-                            </div>
-                            <?php if (!empty($mat['url_archivo'])): ?>
-                                <a href="<?= htmlspecialchars($mat['url_archivo']) ?>" download="<?= htmlspecialchars($mat['nombre']) ?>" class="action-btn" style="padding: 4px 10px; font-size: 12px; text-decoration: none; border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
-                                    Descargar
-                                </a>
-                            <?php else: ?>
-                                <span style="font-size: 12px; color: var(--color-pencil-gray);">Archivo no disponible</span>
-                            <?php endif; ?>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
-            </section>
-
-            <!-- 3. PANEL DE TAREAS (Pendiente, Entregado, Calificado) -->
-            <section class="summary-card" style="display: block; padding: 24px;">
-                <h3 style="font-size: 18px; font-weight: 900; color: var(--color-charcoal); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--color-eager-green)"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                    Panel de Tareas y Evaluaciones
-                </h3>
-                <p style="font-size: 13px; color: var(--color-pencil-gray); margin-bottom: 16px;">
-                    Consulta tus asignaciones y notas asignadas por el ponente titular.
-                </p>
-
-                <div style="display: flex; flex-direction: column; gap: 12px;">
-                    <?php if (empty($tareas)): ?>
-                        <p style="color: var(--color-pencil-gray);">Este curso aún no tiene tareas registradas.</p>
-                    <?php endif; ?>
-                    <?php foreach ($tareas as $tar): ?>
-                        <div style="border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 14px; background-color: var(--color-paper-white);">
-                            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
-                                <h4 style="font-size: 15px; font-weight: 800; color: var(--color-charcoal); line-height: 1.3;">
-                                    <?= htmlspecialchars($tar['titulo']) ?>
-                                </h4>
-                                <!-- Estado de Asignación -->
-                                <?php if ($tar['estado'] === 'Calificado'): ?>
-                                    <span style="background-color: var(--color-storybook-green); color: #2e7a00; font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; white-space: nowrap;">
-                                        Calificado
-                                    </span>
-                                <?php elseif ($tar['estado'] === 'Entregado'): ?>
-                                    <span style="background-color: #e0f4ff; color: var(--color-spark-blue); font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; white-space: nowrap;">
-                                        Entregado
-                                    </span>
-                                <?php else: ?>
-                                    <span style="background-color: #fff4e5; color: #d97706; font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; white-space: nowrap;">
-                                        Pendiente
-                                    </span>
-                                <?php endif; ?>
-                            </div>
-
-                            <p style="font-size: 12px; color: var(--color-pencil-gray); margin-bottom: 10px;">
-                                Fecha límite: <?= htmlspecialchars($tar['fecha_limite']) ?>
-                            </p>
-
-                            <!-- Calificación final si ya fue revisada -->
-                            <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--color-border-gray); padding-top: 8px;">
-                                <span style="font-size: 13px; font-weight: 700; color: var(--color-pencil-gray);">Calificación final:</span>
-                                <?php if ($tar['estado'] === 'Calificado' && $tar['calificacion'] !== null): ?>
-                                    <strong style="font-size: 15px; color: var(--color-eager-green);">
-                                        <?= number_format((float)$tar['calificacion'], 1) ?> / 10
-                                    </strong>
-                                <?php elseif ($tar['estado'] === 'Entregado'): ?>
-                                    <span style="font-size: 12px; color: var(--color-pencil-gray); font-style: italic;">
-                                        En revisión por el ponente
-                                    </span>
-                                <?php else: ?>
-                                    <span style="font-size: 12px; color: #d97706; font-weight: 700;">
-                                        Sin entregar
-                                    </span>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            </section>
-        </div>
     </div>
 </article>

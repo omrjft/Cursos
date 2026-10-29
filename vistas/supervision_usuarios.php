@@ -26,15 +26,24 @@ $resultadoSupervision = $conexion->query(
      JOIN roles r ON r.id = u.rol_id
      LEFT JOIN cursos c
        ON (u.rol_id = 3 AND c.id IN (
-            SELECT matricula.curso_id FROM matriculas matricula WHERE matricula.usuario_id = u.id
+            SELECT matricula.curso_id
+            FROM matriculas matricula
+            JOIN cursos curso ON curso.id = matricula.curso_id
+            JOIN usuarios ponente ON ponente.id = curso.docente_id AND ponente.estado = 'Activo'
+            WHERE matricula.usuario_id = u.id
        ))
-       OR (u.rol_id = 4 AND c.docente_id = u.id)
+       OR (u.rol_id = 4 AND c.docente_id = u.id AND c.docente_id IN (
+            SELECT docente.id FROM usuarios docente WHERE docente.estado = 'Activo'
+       ))
      LEFT JOIN (
        SELECT matricula.usuario_id, matricula.curso_id,
               CASE WHEN COUNT(DISTINCT tema.id) = 0 THEN 0
                    ELSE ROUND(COUNT(DISTINCT progreso.tema_id) * 100 / COUNT(DISTINCT tema.id), 2)
               END AS progreso
        FROM matriculas matricula
+       JOIN usuarios alumno ON alumno.id = matricula.usuario_id AND alumno.estado = 'Activo'
+       JOIN cursos cursoActivo ON cursoActivo.id = matricula.curso_id
+       JOIN usuarios ponenteActivo ON ponenteActivo.id = cursoActivo.docente_id AND ponenteActivo.estado = 'Activo'
        LEFT JOIN bloques bloque ON bloque.curso_id = matricula.curso_id
        LEFT JOIN temas tema ON tema.bloque_id = bloque.id
        LEFT JOIN progreso_temas progreso
@@ -42,7 +51,7 @@ $resultadoSupervision = $conexion->query(
        GROUP BY matricula.usuario_id, matricula.curso_id
      ) m
        ON m.curso_id = c.id AND (u.rol_id = 4 OR m.usuario_id = u.id)
-     WHERE {$condicionRol}
+     WHERE u.estado = 'Activo' AND {$condicionRol}
      GROUP BY u.id, u.nombre, u.email, u.rol_id
      ORDER BY u.nombre ASC"
 );

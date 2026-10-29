@@ -74,6 +74,8 @@ if ($esSuperadmin):
                                     $est = $cg['estado'];
                                     if ($est === 'Publicado') {
                                         $estiloPill = 'background-color: var(--color-storybook-green); color: #2e7a00;';
+                                    } elseif ($est === 'Inactivo') {
+                                        $estiloPill = 'background-color: #ffdfe0; color: #b42318;';
                                     } else {
                                         $estiloPill = 'background-color: #fff4e5; color: #d97706;';
                                     }
@@ -86,13 +88,33 @@ if ($esSuperadmin):
                                 <?= $cg['created_at'] ? htmlspecialchars(date('d/m/Y', strtotime($cg['created_at']))) : '—' ?>
                             </td>
                             <td style="text-align: right; white-space: nowrap;">
-                                <?php if ($cg['estado'] !== 'Publicado'): ?>
+                                <?php if ($cg['estado'] === 'Borrador'): ?>
                                     <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline;">
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                                         <input type="hidden" name="accion" value="actualizar_estado_curso">
                                         <input type="hidden" name="curso_id" value="<?= (int)$cg['id'] ?>">
                                         <button type="submit" class="action-btn" style="border-color: var(--color-eager-green); color: #2e7a00; margin-right: 4px;">
                                             Publicar
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
+
+                                <?php if (in_array($cg['estado'], ['Publicado', 'Borrador'], true)): ?>
+                                    <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                        <input type="hidden" name="accion" value="desactivar_curso">
+                                        <input type="hidden" name="curso_id" value="<?= (int)$cg['id'] ?>">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-error); color: var(--color-error); margin-right: 4px;">
+                                            Desactivar
+                                        </button>
+                                    </form>
+                                <?php elseif ($cg['estado'] === 'Inactivo'): ?>
+                                    <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                        <input type="hidden" name="accion" value="activar_curso">
+                                        <input type="hidden" name="curso_id" value="<?= (int)$cg['id'] ?>">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue); margin-right: 4px;">
+                                            Reactivar como borrador
                                         </button>
                                     </form>
                                 <?php endif; ?>
@@ -131,9 +153,11 @@ if ($esSuperadmin):
 // ========================================================
 elseif ($esDirector):
     $sqlTodosCursos = "SELECT c.id, c.titulo, c.descripcion, c.estado, u.nombre AS docente,
-                        (SELECT COUNT(*) FROM matriculas m WHERE m.curso_id = c.id) AS total_alumnos
+                        (SELECT COUNT(*) FROM matriculas m
+                         JOIN usuarios alumno ON alumno.id = m.usuario_id AND alumno.estado = 'Activo'
+                         WHERE m.curso_id = c.id) AS total_alumnos
                        FROM cursos c
-                       LEFT JOIN usuarios u ON c.docente_id = u.id
+                       JOIN usuarios u ON c.docente_id = u.id AND u.estado = 'Activo'
                        ORDER BY c.id ASC";
     $resTC = $conexion->query($sqlTodosCursos);
     $cursosCatalogo = [];
@@ -187,11 +211,48 @@ elseif ($esDirector):
                                 <?= (int)$c['total_alumnos'] ?>
                             </td>
                             <td style="text-align: center;">
-                                <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; <?= ($c['estado'] === 'Publicado') ? 'background-color: var(--color-storybook-green); color: #2e7a00;' : 'background-color: #f0f0f0; color: #777;' ?>">
+                                <?php
+                                    if ($c['estado'] === 'Publicado') {
+                                        $estiloEstadoCatalogo = 'background-color: var(--color-storybook-green); color: #2e7a00;';
+                                    } elseif ($c['estado'] === 'Inactivo') {
+                                        $estiloEstadoCatalogo = 'background-color: #ffdfe0; color: #b42318;';
+                                    } else {
+                                        $estiloEstadoCatalogo = 'background-color: #fff4e5; color: #d97706;';
+                                    }
+                                ?>
+                                <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; <?= $estiloEstadoCatalogo ?>">
                                     <?= htmlspecialchars($c['estado'] ?? 'Borrador') ?>
                                 </span>
                             </td>
                             <td style="text-align: right; white-space: nowrap;">
+                                <?php if ($c['estado'] === 'Borrador'): ?>
+                                    <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                        <input type="hidden" name="accion" value="actualizar_estado_curso">
+                                        <input type="hidden" name="curso_id" value="<?= (int)$c['id'] ?>">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-eager-green); color: #2e7a00; margin-right: 4px;">
+                                            Publicar
+                                        </button>
+                                    </form>
+                                <?php elseif ($c['estado'] === 'Publicado'): ?>
+                                    <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                        <input type="hidden" name="accion" value="desactivar_curso">
+                                        <input type="hidden" name="curso_id" value="<?= (int)$c['id'] ?>">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-error); color: var(--color-error); margin-right: 4px;">
+                                            Desactivar
+                                        </button>
+                                    </form>
+                                <?php elseif ($c['estado'] === 'Inactivo'): ?>
+                                    <form method="POST" action="dashboard.php?seccion=cursos" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                        <input type="hidden" name="accion" value="activar_curso">
+                                        <input type="hidden" name="curso_id" value="<?= (int)$c['id'] ?>">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue); margin-right: 4px;">
+                                            Reactivar como borrador
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
                                 <a href="dashboard.php?seccion=curso_detalle&id=<?= (int)$c['id'] ?>" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue);">
                                     Ver Temario
                                 </a>
@@ -214,12 +275,12 @@ elseif ($esAlumno):
                                END AS progreso_global
                         FROM matriculas m
                         JOIN cursos c ON m.curso_id = c.id
-                        JOIN usuarios u ON c.docente_id = u.id
+                        JOIN usuarios u ON c.docente_id = u.id AND u.estado = 'Activo'
                         LEFT JOIN bloques b ON b.curso_id = c.id
                         LEFT JOIN temas t ON t.bloque_id = b.id
                         LEFT JOIN progreso_temas pt
                           ON pt.tema_id = t.id AND pt.usuario_id = m.usuario_id
-                        WHERE m.usuario_id = ?
+                        WHERE m.usuario_id = ? AND c.estado = 'Publicado'
                         GROUP BY m.usuario_id, c.id, c.titulo, c.descripcion, u.nombre
                         ORDER BY c.titulo ASC";
     $stmtCA = $conexion->prepare($sqlCursosAlumno);
@@ -232,57 +293,118 @@ elseif ($esAlumno):
         $cursosInscritos[] = $fila;
     }
 
+    $stmtCatalogoAlumno = $conexion->prepare(
+        "SELECT c.id, c.titulo, c.descripcion, u.nombre AS docente
+         FROM cursos c
+         JOIN usuarios u ON u.id = c.docente_id AND u.estado = 'Activo'
+         WHERE c.estado = 'Publicado'
+           AND NOT EXISTS (
+               SELECT 1 FROM matriculas m
+               WHERE m.curso_id = c.id AND m.usuario_id = ?
+           )
+         ORDER BY c.titulo ASC"
+    );
+    $stmtCatalogoAlumno->bind_param('i', $usuario_id);
+    $stmtCatalogoAlumno->execute();
+    $resultadoCatalogoAlumno = $stmtCatalogoAlumno->get_result();
+    $cursosDisponibles = [];
+    while ($fila = $resultadoCatalogoAlumno->fetch_assoc()) {
+        $cursosDisponibles[] = $fila;
+    }
+
 ?>
     <section>
-        <div style="margin-bottom: 24px;">
+        <div style="margin-bottom: 32px;">
             <h2 style="font-size: 26px; font-weight: 900; color: var(--color-charcoal); letter-spacing: -0.01em;">Mis Cursos</h2>
             <p style="color: var(--color-pencil-gray); font-size: 15px; margin-top: 4px;">
                 Cursos en los que te encuentras matriculado actualmente. Sigue tu avance día a día.
             </p>
-        </div>
 
-        <?php if (empty($cursosInscritos)): ?>
-            <article class="summary-card" style="display: block; text-align: center; padding: 32px;">
-                No tienes cursos matriculados actualmente.
-            </article>
-        <?php else: ?>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px;">
-            <?php foreach ($cursosInscritos as $c): ?>
-                <?php 
-                    $progreso = round((float)($c['progreso_global'] ?? 0));
-                    $estaCompletado = ($progreso >= 100);
-                ?>
-                <article class="summary-card" style="display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 18px; padding: 26px;">
-                    <div>
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; <?= $estaCompletado ? 'background-color: var(--color-storybook-green); color: #2e7a00;' : 'background-color: #e0f4ff; color: var(--color-spark-blue);' ?>">
-                                <?= $estaCompletado ? 'Completado' : 'En progreso' ?>
-                            </span>
-                            <span style="font-size: 14px; font-weight: 800; color: var(--color-charcoal);">
-                                <?= $progreso ?>%
-                            </span>
-                        </div>
-
-                        <h3 style="font-size: 20px; font-weight: 900; color: var(--color-charcoal); line-height: 1.25; margin-bottom: 8px;">
-                            <?= htmlspecialchars($c['titulo']) ?>
-                        </h3>
-
-                        <p style="font-size: 14px; color: var(--color-pencil-gray); margin-bottom: 16px;">
-                            Docente: <strong style="color: var(--color-charcoal);"><?= htmlspecialchars($c['docente']) ?></strong>
-                        </p>
-
-                        <div style="margin-bottom: 18px;">
-                            <progress value="<?= $progreso ?>" max="100" style="width: 100%; height: 14px; border-radius: 999px; overflow: hidden; accent-color: var(--color-eager-green);"></progress>
-                        </div>
-                    </div>
-
-                    <a href="dashboard.php?seccion=curso_detalle&id=<?= (int)$c['id'] ?>" class="welcome-btn" style="text-align: center; justify-content: center; padding: 12px 18px;">
-                        Continuar Curso &rarr;
-                    </a>
+            <?php if (empty($cursosInscritos)): ?>
+                <article class="summary-card" style="display: block; text-align: center; padding: 32px; margin-top: 18px;">
+                    Aún no estás inscrito en ningún curso. Explora el catálogo y elige por dónde empezar.
                 </article>
-            <?php endforeach; ?>
+            <?php else: ?>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; margin-top: 18px;">
+                    <?php foreach ($cursosInscritos as $c): ?>
+                        <?php
+                            $progreso = round((float)($c['progreso_global'] ?? 0));
+                            $estaCompletado = ($progreso >= 100);
+                        ?>
+                        <article class="summary-card" style="display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 18px; padding: 26px;">
+                            <div>
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                                    <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; <?= $estaCompletado ? 'background-color: var(--color-storybook-green); color: #2e7a00;' : 'background-color: #e0f4ff; color: var(--color-spark-blue);' ?>">
+                                        <?= $estaCompletado ? 'Completado' : 'En progreso' ?>
+                                    </span>
+                                    <span style="font-size: 14px; font-weight: 800; color: var(--color-charcoal);">
+                                        <?= $progreso ?>%
+                                    </span>
+                                </div>
+
+                                <h3 style="font-size: 20px; font-weight: 900; color: var(--color-charcoal); line-height: 1.25; margin-bottom: 8px;">
+                                    <?= htmlspecialchars($c['titulo']) ?>
+                                </h3>
+
+                                <p style="font-size: 14px; color: var(--color-pencil-gray); margin-bottom: 16px;">
+                                    Docente: <strong style="color: var(--color-charcoal);"><?= htmlspecialchars($c['docente']) ?></strong>
+                                </p>
+
+                                <div style="margin-bottom: 18px;">
+                                    <progress value="<?= $progreso ?>" max="100" style="width: 100%; height: 14px; border-radius: 999px; overflow: hidden; accent-color: var(--color-eager-green);"></progress>
+                                </div>
+                            </div>
+
+                            <a href="dashboard.php?seccion=curso_detalle&id=<?= (int)$c['id'] ?>" class="welcome-btn" style="text-align: center; justify-content: center; padding: 12px 18px;">
+                                Continuar Curso &rarr;
+                            </a>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
         </div>
-        <?php endif; ?>
+
+        <div>
+            <h2 style="font-size: 26px; font-weight: 900; color: var(--color-charcoal); letter-spacing: -0.01em;">Explorar cursos</h2>
+            <p style="color: var(--color-pencil-gray); font-size: 15px; margin-top: 4px; margin-bottom: 18px;">
+                Descubre cursos publicados e inscríbete para comenzar.
+            </p>
+
+            <?php if (empty($cursosDisponibles)): ?>
+                <article class="summary-card" style="display: block; text-align: center; padding: 32px;">
+                    No hay cursos nuevos disponibles por el momento.
+                </article>
+            <?php else: ?>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px;">
+                    <?php foreach ($cursosDisponibles as $cursoDisponible): ?>
+                        <article class="summary-card" style="display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 18px; padding: 26px;">
+                            <div>
+                                <span style="display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; background-color: var(--color-storybook-green); color: #2e7a00; margin-bottom: 12px;">
+                                    Disponible
+                                </span>
+                                <h3 style="font-size: 20px; font-weight: 900; color: var(--color-charcoal); line-height: 1.25; margin-bottom: 8px;">
+                                    <?= htmlspecialchars($cursoDisponible['titulo']) ?>
+                                </h3>
+                                <p style="font-size: 14px; color: var(--color-pencil-gray); margin-bottom: 12px;">
+                                    Docente: <strong style="color: var(--color-charcoal);"><?= htmlspecialchars($cursoDisponible['docente']) ?></strong>
+                                </p>
+                                <p style="font-size: 14px; color: var(--color-pencil-gray); line-height: 1.5;">
+                                    <?= nl2br(htmlspecialchars($cursoDisponible['descripcion'] ?? 'Sin descripción disponible.')) ?>
+                                </p>
+                            </div>
+                            <form method="POST" action="dashboard.php?seccion=cursos">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                <input type="hidden" name="accion" value="inscribir_curso">
+                                <input type="hidden" name="curso_id" value="<?= (int)$cursoDisponible['id'] ?>">
+                                <button type="submit" class="welcome-btn" style="width: 100%; justify-content: center; padding: 12px 18px;">
+                                    Inscribirme
+                                </button>
+                            </form>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
     </section>
 
 <?php
@@ -292,14 +414,22 @@ elseif ($esAlumno):
 else:
     $cursos = [];
     $resumenDocente = [
-        'total_alumnos' => 0,
-        'tareas_pendientes' => 0
+        'total_alumnos' => 0
     ];
 
     $sqlCursos = "SELECT c.id, c.titulo, c.descripcion, c.estado,
-                    (SELECT COUNT(*) FROM matriculas m WHERE m.curso_id = c.id) AS alumnos,
-                    (SELECT COUNT(*) FROM entregas_tareas e JOIN tareas t ON e.tarea_id = t.id WHERE t.curso_id = c.id AND e.calificacion IS NULL) AS tareas
+                    (SELECT COUNT(*) FROM matriculas m
+                     JOIN usuarios alumno ON alumno.id = m.usuario_id AND alumno.estado = 'Activo'
+                     WHERE m.curso_id = c.id) AS alumnos,
+                    (SELECT COUNT(*) FROM revisiones_temas revision
+                     JOIN usuarios alumno ON alumno.id = revision.usuario_id AND alumno.estado = 'Activo'
+                     JOIN temas tema ON tema.id = revision.tema_id
+                     JOIN bloques bloque ON bloque.id = tema.bloque_id
+                     WHERE bloque.curso_id = c.id
+                       AND revision.ponente_id = c.docente_id
+                       AND revision.estado = 'pendiente') AS revisiones_pendientes
                   FROM cursos c
+                  JOIN usuarios ponente ON ponente.id = c.docente_id AND ponente.estado = 'Activo'
                   WHERE c.docente_id = ?
                   ORDER BY c.id DESC";
 
@@ -313,21 +443,26 @@ else:
     }
 
     $stmtTotales = $conexion->prepare("SELECT 
-        (SELECT COUNT(DISTINCT m.usuario_id) FROM matriculas m JOIN cursos c ON m.curso_id = c.id WHERE c.docente_id = ?) AS total_alumnos,
-        (SELECT COUNT(*) FROM entregas_tareas e JOIN tareas t ON e.tarea_id = t.id JOIN cursos c ON t.curso_id = c.id WHERE c.docente_id = ? AND e.calificacion IS NULL) AS tareas_pendientes");
+        (SELECT COUNT(DISTINCT m.usuario_id) FROM matriculas m JOIN usuarios alumno ON alumno.id = m.usuario_id AND alumno.estado = 'Activo' JOIN cursos c ON m.curso_id = c.id WHERE c.docente_id = ?) AS total_alumnos,
+        (SELECT COUNT(*) FROM revisiones_temas revision
+         JOIN usuarios alumno ON alumno.id = revision.usuario_id AND alumno.estado = 'Activo'
+         JOIN temas tema ON tema.id = revision.tema_id
+         JOIN bloques bloque ON bloque.id = tema.bloque_id
+         JOIN cursos c ON c.id = bloque.curso_id AND c.docente_id = revision.ponente_id
+         WHERE revision.ponente_id = ? AND revision.estado = 'pendiente') AS revisiones_pendientes");
     $stmtTotales->bind_param("ii", $usuario_id, $usuario_id);
     $stmtTotales->execute();
     $resTotales = $stmtTotales->get_result()->fetch_assoc();
 
     $resumenDocente['total_alumnos'] = (int)($resTotales['total_alumnos'] ?? 0);
-    $resumenDocente['tareas_pendientes'] = (int)($resTotales['tareas_pendientes'] ?? 0);
+    $resumenDocente['revisiones_pendientes'] = (int)($resTotales['revisiones_pendientes'] ?? 0);
 ?>
     <section>
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
             <div>
                 <h2 style="font-size: 26px; font-weight: 900; color: var(--color-charcoal); letter-spacing: -0.01em;">Mis Cursos</h2>
                 <p style="color: var(--color-pencil-gray); font-size: 15px; margin-top: 4px;">
-                    Gestiona tus asignaturas, temarios y calificaciones de entregas.
+                    Gestiona tus asignaturas, temarios y solicitudes de revisión de temas.
                 </p>
             </div>
 
@@ -355,8 +490,11 @@ else:
                     <svg viewBox="0 0 24 24" style="width: 22px; height: 22px;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
                 </div>
                 <div>
-                    <span class="card-label" style="font-size: 11px;">Tareas Pendientes</span>
-                    <p style="font-size: 22px; font-weight: 900; color: var(--color-charcoal);"><?= $resumenDocente['tareas_pendientes'] ?></p>
+                    <a href="dashboard.php?seccion=revisiones_temas" style="color: inherit; text-decoration: none;">
+                        <span class="card-label" style="font-size: 11px;">Temas por Revisar</span>
+                        <p style="font-size: 22px; font-weight: 900; color: var(--color-charcoal);"><?= $resumenDocente['revisiones_pendientes'] ?></p>
+                        <span style="font-size: 12px; color: var(--color-spark-blue); font-weight: 800;">Abrir revisiones</span>
+                    </a>
                 </div>
             </div>
         </div>
@@ -384,7 +522,7 @@ else:
                             <th style="min-width: 220px;">Curso</th>
                             <th>Descripción</th>
                             <th style="text-align: center;">Alumnos Inscritos</th>
-                            <th style="text-align: center;">Tareas por Revisar</th>
+                            <th style="text-align: center;">Temas por Revisar</th>
                             <th style="text-align: right; min-width: 240px;">Acciones</th>
                         </tr>
                     </thead>
@@ -410,14 +548,14 @@ else:
                                     <?= (int)$curso['alumnos'] ?>
                                 </td>
                                 <td style="text-align: center;">
-                                    <?php $tPendientes = (int)$curso['tareas']; ?>
+                                    <?php $tPendientes = (int)$curso['revisiones_pendientes']; ?>
                                     <?php if ($tPendientes > 0): ?>
-                                        <span style="display: inline-block; background-color: #fff4e5; color: #d97706; border: 1px solid #fcd34d; font-weight: 800; font-size: 13px; padding: 4px 10px; border-radius: 999px;">
+                                        <a href="dashboard.php?seccion=revisiones_temas" style="display: inline-block; background-color: #fff4e5; color: #d97706; border: 1px solid #fcd34d; font-weight: 800; font-size: 13px; padding: 4px 10px; border-radius: 999px; text-decoration: none;">
                                             <?= $tPendientes ?> pendientes
-                                        </span>
+                                        </a>
                                     <?php else: ?>
                                         <span style="color: var(--color-faded-gray); font-size: 13px; font-weight: 600;">
-                                            Al día
+                                            <a href="dashboard.php?seccion=revisiones_temas" style="color: inherit; text-decoration: none;">Al día</a>
                                         </span>
                                     <?php endif; ?>
                                 </td>
@@ -425,8 +563,8 @@ else:
                                     <a href="dashboard.php?seccion=editar_temario&id=<?= (int)$curso['id'] ?>" class="action-btn" style="border-color: var(--color-spark-blue); color: var(--color-spark-blue); margin-right: 6px;">
                                         Editar Temario
                                     </a>
-                                    <a href="dashboard.php?seccion=calificar_entregas&id=<?= (int)$curso['id'] ?>" class="action-btn" style="background-color: var(--color-bg-light);">
-                                        Calificar Entregas
+                                    <a href="dashboard.php?seccion=revisiones_temas" class="action-btn" style="background-color: var(--color-bg-light);">
+                                        Revisar Temas
                                     </a>
                                 </td>
                             </tr>

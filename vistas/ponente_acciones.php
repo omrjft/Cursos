@@ -68,7 +68,7 @@ if (!$curso) {
                 <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px;">
                     <?php foreach ($bloquesCurso as $bloque): ?>
                         <?php
-                        $stmtTemas = $conexion->prepare('SELECT titulo FROM temas WHERE bloque_id = ? ORDER BY orden, id');
+                        $stmtTemas = $conexion->prepare('SELECT id, titulo, descripcion FROM temas WHERE bloque_id = ? ORDER BY orden, id');
                         $stmtTemas->bind_param('i', $bloque['id']);
                         $stmtTemas->execute();
                         $temasBloque = $stmtTemas->get_result();
@@ -76,11 +76,115 @@ if (!$curso) {
                         <article style="border: 1px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 16px;">
                             <h4 style="margin-bottom: 10px;"><?= htmlspecialchars($bloque['titulo']) ?></h4>
                             <?php if ($temasBloque->num_rows > 0): ?>
-                                <ul style="padding-left: 20px; margin-bottom: 14px;">
+                                <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px;">
                                     <?php while ($tema = $temasBloque->fetch_assoc()): ?>
-                                        <li><?= htmlspecialchars($tema['titulo']) ?></li>
+                                        <article style="border: 1px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 14px;">
+                                            <form method="POST" action="dashboard.php?seccion=editar_temario&amp;id=<?= $curso_id ?>">
+                                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                <input type="hidden" name="accion_ponente" value="actualizar_tema">
+                                                <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
+                                                <input type="hidden" name="tema_id" value="<?= (int)$tema['id'] ?>">
+                                                <label style="display: block; font-size: 13px; font-weight: 800; margin-bottom: 8px;">
+                                                    Tema
+                                                    <input name="titulo" maxlength="255" required value="<?= htmlspecialchars($tema['titulo']) ?>" style="display: block; width: 100%; margin-top: 5px;">
+                                                </label>
+                                                <label style="display: block; font-size: 13px; font-weight: 800; margin-bottom: 10px;">
+                                                    Descripción
+                                                    <textarea name="descripcion" maxlength="10000" rows="3" style="display: block; width: 100%; margin-top: 5px;"><?= htmlspecialchars($tema['descripcion'] ?? '') ?></textarea>
+                                                </label>
+                                                <button type="submit" class="action-btn">Guardar tema</button>
+                                            </form>
+
+                                            <?php
+                                            $stmtMateriales = $conexion->prepare(
+                                                'SELECT id, nombre, tipo, url_externa, url_archivo
+                                                 FROM materiales
+                                                 WHERE tema_id = ?
+                                                 ORDER BY id'
+                                            );
+                                            $stmtMateriales->bind_param('i', $tema['id']);
+                                            $stmtMateriales->execute();
+                                            $materialesTema = $stmtMateriales->get_result();
+                                            ?>
+                                            <div style="margin-top: 14px;">
+                                                <h5 style="font-size: 13px; font-weight: 800; color: var(--color-charcoal); margin-bottom: 8px;">
+                                                    Materiales existentes
+                                                </h5>
+                                                <?php if ($materialesTema->num_rows === 0): ?>
+                                                    <p style="font-size: 12px; color: var(--color-pencil-gray);">Este tema aún no tiene materiales.</p>
+                                                <?php else: ?>
+                                                    <ul style="display: flex; flex-direction: column; gap: 8px; list-style: none; margin: 0; padding: 0;">
+                                                        <?php while ($material = $materialesTema->fetch_assoc()): ?>
+                                                            <?php $urlMaterialExistente = $material['url_externa'] ?: $material['url_archivo']; ?>
+                                                            <li style="padding: 10px; background: var(--color-bg-light); border-radius: var(--radius-btn);">
+                                                                <form method="POST" action="dashboard.php?seccion=editar_temario&amp;id=<?= $curso_id ?>" style="display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 2fr) auto; gap: 8px; align-items: end;">
+                                                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                                    <input type="hidden" name="accion_ponente" value="actualizar_material">
+                                                                    <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
+                                                                    <input type="hidden" name="material_id" value="<?= (int)$material['id'] ?>">
+                                                                    <label style="font-size: 12px; font-weight: 800;">
+                                                                        Nombre
+                                                                        <input name="nombre" maxlength="255" required value="<?= htmlspecialchars($material['nombre'] ?? '') ?>" style="display: block; width: 100%; margin-top: 5px;">
+                                                                    </label>
+                                                                    <label style="font-size: 12px; font-weight: 800;">
+                                                                        Enlace externo (opcional)
+                                                                        <input type="url" name="url_externa" maxlength="2048" value="<?= htmlspecialchars($material['url_externa'] ?? '') ?>" placeholder="https://..." style="display: block; width: 100%; margin-top: 5px;">
+                                                                    </label>
+                                                                    <button type="submit" class="action-btn">Guardar cambios</button>
+                                                                </form>
+                                                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px;">
+                                                                    <div style="min-width: 0;">
+                                                                        <span style="font-size: 11px; color: var(--color-pencil-gray);">
+                                                                            <?= htmlspecialchars($material['tipo'] ?? 'Material') ?>
+                                                                        </span>
+                                                                        <?php if (empty($material['url_externa']) && !empty($material['url_archivo'])): ?>
+                                                                            <span style="display: block; font-size: 11px; color: var(--color-pencil-gray);">
+                                                                                Archivo local; deja el enlace vacío para conservarlo.
+                                                                            </span>
+                                                                        <?php endif; ?>
+                                                                    <?php if (!empty($urlMaterialExistente)): ?>
+                                                                        <a href="<?= htmlspecialchars($urlMaterialExistente) ?>"
+                                                                           <?= !empty($material['url_externa']) ? 'target="_blank" rel="noopener noreferrer"' : '' ?>
+                                                                           style="display: block; overflow-wrap: anywhere; font-size: 12px; color: var(--color-spark-blue);">
+                                                                            <?= htmlspecialchars($urlMaterialExistente) ?>
+                                                                        </a>
+                                                                    <?php endif; ?>
+                                                                    </div>
+                                                                    <form method="POST" action="dashboard.php?seccion=editar_temario&amp;id=<?= $curso_id ?>"
+                                                                          onsubmit="return confirm('¿Eliminar este material del tema?');">
+                                                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                                        <input type="hidden" name="accion_ponente" value="eliminar_material">
+                                                                        <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
+                                                                        <input type="hidden" name="material_id" value="<?= (int)$material['id'] ?>">
+                                                                        <button type="submit" class="action-btn" style="border-color: #b42318; color: #b42318;">
+                                                                            Eliminar
+                                                                        </button>
+                                                                    </form>
+                                                                </div>
+                                                            </li>
+                                                        <?php endwhile; ?>
+                                                    </ul>
+                                                <?php endif; ?>
+                                            </div>
+
+                                            <form method="POST" action="dashboard.php?seccion=editar_temario&amp;id=<?= $curso_id ?>" style="display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 2fr) auto; gap: 8px; align-items: end; margin-top: 14px;">
+                                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                <input type="hidden" name="accion_ponente" value="agregar_material">
+                                                <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
+                                                <input type="hidden" name="tema_id" value="<?= (int)$tema['id'] ?>">
+                                                <label style="font-size: 12px; font-weight: 800;">
+                                                    Nombre del material
+                                                    <input name="nombre" maxlength="255" required placeholder="Ej. Documentación" style="display: block; width: 100%; margin-top: 5px;">
+                                                </label>
+                                                <label style="font-size: 12px; font-weight: 800;">
+                                                    Enlace externo
+                                                    <input type="url" name="url_externa" maxlength="2048" required placeholder="https://..." style="display: block; width: 100%; margin-top: 5px;">
+                                                </label>
+                                                <button type="submit" class="action-btn">Añadir enlace</button>
+                                            </form>
+                                        </article>
                                     <?php endwhile; ?>
-                                </ul>
+                                </div>
                             <?php else: ?>
                                 <p style="color: var(--color-pencil-gray); margin-bottom: 14px;">Sin temas registrados.</p>
                             <?php endif; ?>
@@ -90,6 +194,7 @@ if (!$curso) {
                                 <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
                                 <input type="hidden" name="bloque_id" value="<?= (int)$bloque['id'] ?>">
                                 <input name="titulo" maxlength="255" required placeholder="Título del nuevo tema">
+                                <textarea name="descripcion" maxlength="10000" rows="2" placeholder="Descripción del tema (opcional)" style="flex: 1 1 100%;"></textarea>
                                 <button type="submit" class="action-btn">Agregar tema</button>
                             </form>
                         </article>
@@ -114,7 +219,7 @@ if (!$curso) {
                         FROM entregas_tareas e
                         JOIN tareas t ON e.tarea_id = t.id
                         JOIN usuarios u ON e.usuario_id = u.id
-                        WHERE t.curso_id = ?
+                        WHERE t.curso_id = ? AND u.estado = 'Activo'
                         ORDER BY e.fecha_entrega DESC";
         $stmtE = $conexion->prepare($sqlEntregas);
         $stmtE->bind_param("i", $curso_id);
