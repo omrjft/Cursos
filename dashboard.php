@@ -1,5 +1,5 @@
 <?php
-//mostrar nombre y tipo de usuario en el dashboard
+
 session_start();
 require_once __DIR__ . '/database.php';
 

@@ -481,7 +481,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cursos Online — Aprender, Enseñar, Crecer</title>
-    <!-- Google Fonts: Nunito para recrear la tipografía redondeada estilo Duolingo -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800;900&display=swap" rel="stylesheet">
@@ -1123,7 +1122,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         </section>
 
-        <!-- 3. Formulario de Login (Derecha) -->
+        <!-- 3. Formulario de Login -->
         <section class="login-card" id="login-form">
             <div id="loginPanel" <?= ($mostrarRegistro || $mostrarPostulacion || $mostrarPostulacionDirector || $mostrarPostulacionSuperadmin) ? 'hidden' : '' ?>>
                 <h2 class="login-card-title">Bienvenido de nuevo</h2>
@@ -1142,7 +1141,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     <div class="alert-box" role="status"><?= htmlspecialchars($postulacionSuperadminMensaje, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div>
                 <?php endif; ?>
 
-                <!-- Mensaje de error dinámico en el DOM -->
+                
                 <div id="general-error" class="alert-box alert-error" style="<?= empty($error) || $mostrarRegistro ? 'display: none;' : '' ?>">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>

@@ -11,9 +11,6 @@ $esPonente = ($rol_id === 4);
 
 // =========================================================================
 // 1. MODO SUPERADMIN: Gestión Global de Cursos
-//    - Reestructuración de Tabla: Eliminadas métricas de docente ("Tareas pendientes", "Alumnos inscritos").
-//    - Nuevas Columnas: Título, Docente Asignado, Estado (Borrador o Publicado), Fecha de Creación.
-//    - Nuevas Acciones: Publicar un borrador y reasignar al ponente.
 // =========================================================================
 if ($esSuperadmin):
     $stmtGlobal = $conexion->prepare(
