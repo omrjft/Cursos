@@ -1,7 +1,7 @@
 <?php
 if (!isset($_SESSION['id']) || (int)($_SESSION['rol_id'] ?? 0) !== 4) {
     http_response_code(403);
-    echo '<p style="color: #ea2b2b; font-weight: 700;">Acceso denegado.</p>';
+    echo '<p style="color: #ff7887; font-weight: 700;">Acceso denegado.</p>';
     return;
 }
 

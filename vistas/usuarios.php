@@ -217,7 +217,7 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
                             <?= htmlspecialchars($usuario['email']) ?>
                         </td>
                         <td>
-                            <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; background-color: #f0f0f0; color: var(--color-charcoal);">
+                            <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; background-color: #263547; color: var(--color-charcoal);">
                                 <?= htmlspecialchars($usuario['rol']) ?>
                             </span>
                         </td>
@@ -226,7 +226,7 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
                                 $esActivo = ($usuario['estado'] === 'Activo');
                                 $esInactivo = ($usuario['estado'] === 'Inactivo');
                             ?>
-                            <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; <?= $esActivo ? 'background-color: var(--color-storybook-green); color: #2e7a00;' : ($esInactivo ? 'background-color: #ffdfe0; color: #ea2b2b;' : 'background-color: #fff4e5; color: #d97706;') ?>">
+                            <span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; <?= $esActivo ? 'background-color: var(--color-storybook-green); color: var(--color-spark-blue);' : ($esInactivo ? 'background-color: #3a2028; color: #ff7887;' : 'background-color: #3c2d18; color: #f0b35e;') ?>">
                                 <?= htmlspecialchars($usuario['estado']) ?>
                             </span>
                         </td>
@@ -237,7 +237,7 @@ while ($usuario = $resultadoUsuarios->fetch_assoc()) {
                                     <input type="hidden" name="accion" value="cambiar_estado_usuario">
                                     <input type="hidden" name="usuario_id" value="<?= (int)$usuario['id'] ?>">
                                     <input type="hidden" name="estado" value="<?= $usuario['estado'] === 'Activo' ? 'Inactivo' : 'Activo' ?>">
-                                    <button type="submit" class="action-btn" style="<?= $usuario['estado'] === 'Activo' ? 'border-color: #ea2b2b; color: #ea2b2b;' : 'border-color: var(--color-eager-green); color: #2e7a00;' ?>">
+                                    <button type="submit" class="action-btn" style="<?= $usuario['estado'] === 'Activo' ? 'border-color: #ff7887; color: #ff7887;' : 'border-color: var(--color-eager-green); color: var(--color-spark-blue);' ?>">
                                         <?= $usuario['estado'] === 'Activo' ? 'Desactivar' : 'Activar' ?>
                                     </button>
                                 </form>

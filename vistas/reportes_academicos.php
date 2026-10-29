@@ -142,7 +142,7 @@ while ($fila = $consultaCursos->fetch_assoc()) {
                     <span style="display: inline-block; width: 10px; height: 10px; background-color: var(--color-eager-green); border-radius: 50%;"></span>
                     Promedios más altos por curso
                 </h3>
-                <span style="font-size: 11px; font-weight: 800; background-color: var(--color-storybook-green); color: #2e7a00; padding: 3px 8px; border-radius: 999px;">TOP 3</span>
+                <span style="font-size: 11px; font-weight: 800; background-color: var(--color-storybook-green); color: var(--color-spark-blue); padding: 3px 8px; border-radius: 999px;">TOP 3</span>
             </div>
 
             <table>
@@ -176,10 +176,10 @@ while ($fila = $consultaCursos->fetch_assoc()) {
         <article class="summary-card" style="display: block; padding: 24px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
                 <h3 style="font-size: 18px; font-weight: 900; color: var(--color-charcoal); display: flex; align-items: center; gap: 8px;">
-                    <span style="display: inline-block; width: 10px; height: 10px; background-color: #ea2b2b; border-radius: 50%;"></span>
+                    <span style="display: inline-block; width: 10px; height: 10px; background-color: #ff7887; border-radius: 50%;"></span>
                     Promedios más bajos por curso
                 </h3>
-                <span style="font-size: 11px; font-weight: 800; background-color: #ffebee; color: #ea2b2b; padding: 3px 8px; border-radius: 999px;">ATENCIÓN</span>
+                <span style="font-size: 11px; font-weight: 800; background-color: #3a2028; color: #ff7887; padding: 3px 8px; border-radius: 999px;">ATENCIÓN</span>
             </div>
 
             <table>
@@ -198,12 +198,12 @@ while ($fila = $consultaCursos->fetch_assoc()) {
                     <?php endif; ?>
                     <?php foreach ($alumnosPeor as $a): ?>
                         <tr>
-                            <td style="font-weight: 800; color: #ea2b2b;"><?= $a['posicion'] ?></td>
+                            <td style="font-weight: 800; color: #ff7887;"><?= $a['posicion'] ?></td>
                             <td style="font-weight: 700; color: var(--color-charcoal);"><?= htmlspecialchars($a['nombre']) ?></td>
                             <td style="font-size: 13px; color: var(--color-pencil-gray);"><?= htmlspecialchars($a['curso']) ?></td>
                             <td style="text-align: right; font-weight: 800;"><?= $a['promedio'] ?> (<?= $a['estado'] ?>)</td>
                             <td style="text-align: right;">
-                                <span style="font-size: 11px; font-weight: 800; background-color: #fff4e5; color: #d97706; padding: 2px 8px; border-radius: 999px;">
+                                <span style="font-size: 11px; font-weight: 800; background-color: #3c2d18; color: #f0b35e; padding: 2px 8px; border-radius: 999px;">
                                     <?= $a['progreso'] ?>
                                 </span>
                             </td>

@@ -73,11 +73,11 @@ if ($esSuperadmin):
                                 <?php
                                     $est = $cg['estado'];
                                     if ($est === 'Publicado') {
-                                        $estiloPill = 'background-color: var(--color-storybook-green); color: #2e7a00;';
+                                        $estiloPill = 'background-color: var(--color-storybook-green); color: var(--color-spark-blue);';
                                     } elseif ($est === 'Inactivo') {
-                                        $estiloPill = 'background-color: #ffdfe0; color: #b42318;';
+                                        $estiloPill = 'background-color: #3a2028; color: #ff7887;';
                                     } else {
-                                        $estiloPill = 'background-color: #fff4e5; color: #d97706;';
+                                        $estiloPill = 'background-color: #3c2d18; color: #f0b35e;';
                                     }
                                 ?>
                                 <span style="display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; <?= $estiloPill ?>">
@@ -93,7 +93,7 @@ if ($esSuperadmin):
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                                         <input type="hidden" name="accion" value="actualizar_estado_curso">
                                         <input type="hidden" name="curso_id" value="<?= (int)$cg['id'] ?>">
-                                        <button type="submit" class="action-btn" style="border-color: var(--color-eager-green); color: #2e7a00; margin-right: 4px;">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-eager-green); color: var(--color-spark-blue); margin-right: 4px;">
                                             Publicar
                                         </button>
                                     </form>
@@ -213,11 +213,11 @@ elseif ($esDirector):
                             <td style="text-align: center;">
                                 <?php
                                     if ($c['estado'] === 'Publicado') {
-                                        $estiloEstadoCatalogo = 'background-color: var(--color-storybook-green); color: #2e7a00;';
+                                        $estiloEstadoCatalogo = 'background-color: var(--color-storybook-green); color: var(--color-spark-blue);';
                                     } elseif ($c['estado'] === 'Inactivo') {
-                                        $estiloEstadoCatalogo = 'background-color: #ffdfe0; color: #b42318;';
+                                        $estiloEstadoCatalogo = 'background-color: #3a2028; color: #ff7887;';
                                     } else {
-                                        $estiloEstadoCatalogo = 'background-color: #fff4e5; color: #d97706;';
+                                        $estiloEstadoCatalogo = 'background-color: #3c2d18; color: #f0b35e;';
                                     }
                                 ?>
                                 <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; <?= $estiloEstadoCatalogo ?>">
@@ -230,7 +230,7 @@ elseif ($esDirector):
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                                         <input type="hidden" name="accion" value="actualizar_estado_curso">
                                         <input type="hidden" name="curso_id" value="<?= (int)$c['id'] ?>">
-                                        <button type="submit" class="action-btn" style="border-color: var(--color-eager-green); color: #2e7a00; margin-right: 4px;">
+                                        <button type="submit" class="action-btn" style="border-color: var(--color-eager-green); color: var(--color-spark-blue); margin-right: 4px;">
                                             Publicar
                                         </button>
                                     </form>
@@ -334,7 +334,7 @@ elseif ($esAlumno):
                         <article class="summary-card" style="display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 18px; padding: 26px;">
                             <div>
                                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                                    <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; <?= $estaCompletado ? 'background-color: var(--color-storybook-green); color: #2e7a00;' : 'background-color: #e0f4ff; color: var(--color-spark-blue);' ?>">
+                                    <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; <?= $estaCompletado ? 'background-color: var(--color-storybook-green); color: var(--color-spark-blue);' : 'background-color: #162e46; color: var(--color-spark-blue);' ?>">
                                         <?= $estaCompletado ? 'Completado' : 'En progreso' ?>
                                     </span>
                                     <span style="font-size: 14px; font-weight: 800; color: var(--color-charcoal);">
@@ -379,7 +379,7 @@ elseif ($esAlumno):
                     <?php foreach ($cursosDisponibles as $cursoDisponible): ?>
                         <article class="summary-card" style="display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 18px; padding: 26px;">
                             <div>
-                                <span style="display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; background-color: var(--color-storybook-green); color: #2e7a00; margin-bottom: 12px;">
+                                <span style="display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; background-color: var(--color-storybook-green); color: var(--color-spark-blue); margin-bottom: 12px;">
                                     Disponible
                                 </span>
                                 <h3 style="font-size: 20px; font-weight: 900; color: var(--color-charcoal); line-height: 1.25; margin-bottom: 8px;">
@@ -535,7 +535,7 @@ else:
                                     </strong>
                                     <?php if (isset($curso['estado'])): ?>
                                         <div style="margin-top: 4px;">
-                                            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; <?= ($curso['estado'] === 'Publicado') ? 'background-color: var(--color-storybook-green); color: #2e7a00;' : 'background-color: #f0f0f0; color: #777;' ?>">
+                                            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; <?= ($curso['estado'] === 'Publicado') ? 'background-color: var(--color-storybook-green); color: var(--color-spark-blue);' : 'background-color: #263547; color: var(--color-pencil-gray);' ?>">
                                                 <?= htmlspecialchars($curso['estado']) ?>
                                             </span>
                                         </div>
@@ -550,7 +550,7 @@ else:
                                 <td style="text-align: center;">
                                     <?php $tPendientes = (int)$curso['revisiones_pendientes']; ?>
                                     <?php if ($tPendientes > 0): ?>
-                                        <a href="dashboard.php?seccion=revisiones_temas" style="display: inline-block; background-color: #fff4e5; color: #d97706; border: 1px solid #fcd34d; font-weight: 800; font-size: 13px; padding: 4px 10px; border-radius: 999px; text-decoration: none;">
+                                        <a href="dashboard.php?seccion=revisiones_temas" style="display: inline-block; background-color: #3c2d18; color: #f0b35e; border: 1px solid #a87b2c; font-weight: 800; font-size: 13px; padding: 4px 10px; border-radius: 999px; text-decoration: none;">
                                             <?= $tPendientes ?> pendientes
                                         </a>
                                     <?php else: ?>

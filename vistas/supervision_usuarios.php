@@ -112,7 +112,7 @@ while ($usuario = $resultadoSupervision->fetch_assoc()) {
                             </div>
                         </td>
                         <td>
-                            <span style="display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; <?= ($u['rol'] === 'Docente') ? 'background-color: #e0f4ff; color: var(--color-spark-blue);' : 'background-color: var(--color-storybook-green); color: #2e7a00;' ?>">
+                            <span style="display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; <?= ($u['rol'] === 'Docente') ? 'background-color: #162e46; color: var(--color-spark-blue);' : 'background-color: var(--color-storybook-green); color: var(--color-spark-blue);' ?>">
                                 <?= htmlspecialchars($u['rol']) ?>
                             </span>
                         </td>

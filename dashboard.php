@@ -1676,18 +1676,18 @@ if ($esSuperadmin) {
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800;900&display=swap" rel="stylesheet">
     <style>
         :root {
-            /* Colores de DESIGN.md */
-            --color-eager-green: #58cc02;
-            --color-storybook-green: #d7ffb8;
-            --color-spark-blue: #1cb0f6;
-            --color-fresh-leaf: #a5ed6e;
-            --color-night-ink: #000437;
-            --color-paper-white: #ffffff;
-            --color-charcoal: #4b4b4b;
-            --color-pencil-gray: #777777;
-            --color-faded-gray: #afafaf;
-            --color-border-gray: #e5e5e5;
-            --color-bg-light: #f7f9fa;
+            /* Paleta oscura con acentos azules */
+            --color-eager-green: #3b82f6;
+            --color-storybook-green: #1d3554;
+            --color-spark-blue: #60a5fa;
+            --color-fresh-leaf: #3b82f6;
+            --color-night-ink: #e6edf7;
+            --color-paper-white: #111b2b;
+            --color-charcoal: #e6edf7;
+            --color-pencil-gray: #a7b3c5;
+            --color-faded-gray: #516176;
+            --color-border-gray: #29384d;
+            --color-bg-light: #0b1220;
             --radius-btn: 12px;
             --radius-card: 16px;
             --font-family: 'Nunito', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -1701,7 +1701,7 @@ if ($esSuperadmin) {
 
         body {
             font-family: var(--font-family);
-            background-color: var(--color-paper-white);
+            background-color: var(--color-bg-light);
             color: var(--color-charcoal);
             min-height: 100vh;
             display: flex;
@@ -1766,7 +1766,7 @@ if ($esSuperadmin) {
 
         .user-greeting .role-badge {
             background-color: var(--color-storybook-green);
-            color: #2e7a00;
+            color: var(--color-spark-blue);
             font-size: 11px;
             font-weight: 800;
             text-transform: uppercase;
@@ -1825,14 +1825,14 @@ if ($esSuperadmin) {
         }
 
         .btn-logout:hover {
-            background-color: #ffebee;
+            background-color: #3a2028;
         }
 
         /* Layout contenedor del Dashboard */
         .dashboard-container {
             display: flex;
             flex: 1;
-            max-width: 1400px;
+            max-width: none;
             width: 100%;
             margin: 0 auto;
         }
@@ -1891,12 +1891,12 @@ if ($esSuperadmin) {
 
         .sidebar-link.active {
             background-color: var(--color-storybook-green);
-            color: #225a00;
+            color: var(--color-spark-blue);
             border-color: var(--color-eager-green);
         }
 
         .sidebar-link.active svg {
-            fill: #225a00;
+            fill: var(--color-spark-blue);
         }
 
         /* 3. Área Principal de Contenido (Main Content) */
@@ -1950,7 +1950,7 @@ if ($esSuperadmin) {
             border: 2px solid var(--color-faded-gray);
             border-radius: var(--radius-card);
             padding: 24px;
-            box-shadow: 0 4px 0 #e5e5e5;
+            box-shadow: 0 4px 0 #07101d;
             display: flex;
             align-items: center;
             gap: 18px;
@@ -1977,18 +1977,18 @@ if ($esSuperadmin) {
         }
 
         .icon-blue {
-            background-color: #e0f4ff;
+            background-color: #162e46;
             color: var(--color-spark-blue);
         }
 
         .icon-dark {
-            background-color: #f3e8ff;
-            color: #8b5cf6;
+            background-color: #292443;
+            color: #b6a5ff;
         }
 
         .icon-orange {
-            background-color: #fff4e5;
-            color: #d97706;
+            background-color: #3c2d18;
+            color: #f0b35e;
         }
 
         .card-icon-wrapper svg {
@@ -2020,7 +2020,7 @@ if ($esSuperadmin) {
 
         /* Banner de Bienvenida */
         .welcome-banner {
-            background: linear-gradient(135deg, #f7fdf0 0%, #edf9e2 100%);
+            background: linear-gradient(135deg, #142641 0%, #102035 100%);
             border: 2px solid var(--color-fresh-leaf);
             border-radius: var(--radius-card);
             padding: 28px 32px;
@@ -2054,7 +2054,8 @@ if ($esSuperadmin) {
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            box-shadow: 0 4px 0 #46a302;
+            color: #ffffff;
+            box-shadow: 0 4px 0 #1d4ed8;
             white-space: nowrap;
             transition: all 0.1s ease;
             border: none;
@@ -2122,10 +2123,42 @@ if ($esSuperadmin) {
             color: var(--color-spark-blue);
         }
 
+        input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+        select,
+        textarea {
+            color: var(--color-charcoal) !important;
+            background-color: var(--color-bg-light) !important;
+            border-color: var(--color-border-gray) !important;
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+            color: var(--color-pencil-gray);
+            opacity: 1;
+        }
+
+        input[type="checkbox"],
+        input[type="radio"],
+        progress {
+            accent-color: var(--color-eager-green);
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: 2px solid var(--color-spark-blue);
+            outline-offset: 2px;
+        }
+
+        select option {
+            color: var(--color-charcoal);
+            background-color: var(--color-paper-white);
+        }
+
         /* 4. Pie de Página (Footer) */
         .site-footer {
             background-color: var(--color-eager-green);
-            color: var(--color-paper-white);
+            color: #ffffff;
             padding: 24px 32px;
             margin-top: auto;
             text-align: center;
@@ -2134,11 +2167,11 @@ if ($esSuperadmin) {
         }
 
         .site-footer p {
-            color: var(--color-storybook-green);
+            color: #dbeafe;
         }
 
         .site-footer span {
-            color: var(--color-paper-white);
+            color: #ffffff;
         }
 
         /* Responsive */
@@ -2465,7 +2498,7 @@ if ($esSuperadmin) {
                                 </span>
                                 <div style="margin-top: 10px; display: flex; align-items: center; gap: 8px;">
                                     <span style="font-size: 14px; color: var(--color-pencil-gray);">Rol asignado:</span>
-                                    <span class="role-badge" style="background-color: var(--color-storybook-green); color: #2e7a00; font-size: 12px; font-weight: 800; text-transform: uppercase; padding: 2px 10px; border-radius: 999px;">
+                                    <span class="role-badge" style="background-color: var(--color-storybook-green); color: var(--color-spark-blue); font-size: 12px; font-weight: 800; text-transform: uppercase; padding: 2px 10px; border-radius: 999px;">
                                         <?= $tipo_usuario ?>
                                     </span>
                                 </div>
@@ -2487,7 +2520,7 @@ if ($esSuperadmin) {
                             </div>
                             <!-- 2. Llamado a la Acción (CTA): Accesos rápidos administrativos -->
                             <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-                                <a href="dashboard.php?seccion=usuarios" class="welcome-btn" style="background-color: var(--color-paper-white); color: var(--color-eager-green); border: 2px solid var(--color-eager-green); box-shadow: 0 4px 0 #bce69c;">
+                                <a href="dashboard.php?seccion=usuarios" class="welcome-btn" style="background-color: var(--color-paper-white); color: var(--color-eager-green); border: 2px solid var(--color-eager-green); box-shadow: 0 4px 0 #1d3554;">
                                     + Añadir Nuevo Usuario
                                 </a>
                                 <a href="dashboard.php?seccion=cursos" class="welcome-btn">

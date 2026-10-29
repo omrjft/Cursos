@@ -2,7 +2,7 @@
 // Vista: Acciones del Ponente (Editar Temario y Calificar Entregas) con control de propiedad en servidor
 if (!isset($_SESSION["id"]) || ($_SESSION["rol_id"] ?? null) != 4) {
     http_response_code(403);
-    echo "<p style='color: #ea2b2b; font-weight: 700;'>Acceso denegado.</p>";
+    echo "<p style='color: #ff7887; font-weight: 700;'>Acceso denegado.</p>";
     return;
 }
 
@@ -18,12 +18,12 @@ $stmtPropiedad->execute();
 $curso = $stmtPropiedad->get_result()->fetch_assoc();
 
 if (!$curso) {
-    echo "<div class='summary-card' style='border-color: #ea2b2b;'>
-            <div class='card-icon-wrapper' style='background-color: #ffdfe0; color: #ea2b2b;'>
+    echo "<div class='summary-card' style='border-color: #ff7887;'>
+            <div class='card-icon-wrapper' style='background-color: #3a2028; color: #ff7887;'>
                 <svg viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z'/></svg>
             </div>
             <div>
-                <h3 style='color: #ea2b2b;'>Curso no encontrado o acceso no autorizado</h3>
+                <h3 style='color: #ff7887;'>Curso no encontrado o acceso no autorizado</h3>
                 <p style='color: var(--color-pencil-gray); font-size: 14px;'>Solo puedes gestionar cursos de los que eres el ponente titular.</p>
                 <p style='margin-top: 10px;'><a href='dashboard.php?seccion=cursos' class='action-btn'>&larr; Volver a Mis Cursos</a></p>
             </div>
@@ -156,7 +156,7 @@ if (!$curso) {
                                                                         <input type="hidden" name="accion_ponente" value="eliminar_material">
                                                                         <input type="hidden" name="curso_id" value="<?= $curso_id ?>">
                                                                         <input type="hidden" name="material_id" value="<?= (int)$material['id'] ?>">
-                                                                        <button type="submit" class="action-btn" style="border-color: #b42318; color: #b42318;">
+                                                                        <button type="submit" class="action-btn" style="border-color: #ff7887; color: #ff7887;">
                                                                             Eliminar
                                                                         </button>
                                                                     </form>
@@ -270,11 +270,11 @@ if (!$curso) {
                                 </td>
                                 <td>
                                     <?php if ($entrega['calificacion'] === null): ?>
-                                        <span style="background-color: #fff4e5; color: #d97706; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800;">
+                                        <span style="background-color: #3c2d18; color: #f0b35e; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800;">
                                             Pendiente
                                         </span>
                                     <?php else: ?>
-                                        <span style="background-color: var(--color-storybook-green); color: #2e7a00; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800;">
+                                        <span style="background-color: var(--color-storybook-green); color: var(--color-spark-blue); padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800;">
                                             Nota: <?= htmlspecialchars($entrega['calificacion']) ?> / 10
                                         </span>
                                     <?php endif; ?>

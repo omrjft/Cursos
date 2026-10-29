@@ -174,7 +174,7 @@ while ($m = $resM->fetch_assoc()) {
                 <?php foreach ($bloques as $idxBloque => $bloque): ?>
                     <div style="border: 2px solid var(--color-border-gray); border-radius: var(--radius-btn); padding: 16px; background-color: var(--color-bg-light);">
                         <h4 style="font-size: 16px; font-weight: 800; color: var(--color-charcoal); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-                            <span style="width: 24px; height: 24px; background-color: var(--color-storybook-green); color: #2e7a00; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900;">
+                            <span style="width: 24px; height: 24px; background-color: var(--color-storybook-green); color: var(--color-spark-blue); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900;">
                                 <?= $idxBloque + 1 ?>
                             </span>
                             <?= htmlspecialchars($bloque['titulo']) ?>
@@ -191,11 +191,11 @@ while ($m = $resM->fetch_assoc()) {
                                                 <?= htmlspecialchars($tema['titulo']) ?>
                                             </strong>
                                             <?php if ($temaCompletado): ?>
-                                                <span style="color: #2e7a00; font-size: 12px; font-weight: 800; white-space: nowrap;">Aprobado</span>
+                                                <span style="color: var(--color-spark-blue); font-size: 12px; font-weight: 800; white-space: nowrap;">Aprobado</span>
                                             <?php elseif ($estadoRevision === 'pendiente'): ?>
-                                                <span style="color: #d97706; font-size: 12px; font-weight: 800; white-space: nowrap;">Pendiente</span>
+                                                <span style="color: #f0b35e; font-size: 12px; font-weight: 800; white-space: nowrap;">Pendiente</span>
                                             <?php elseif ($estadoRevision === 'requiere_correccion'): ?>
-                                                <span style="color: #b42318; font-size: 12px; font-weight: 800; white-space: nowrap;">Requiere corrección</span>
+                                                <span style="color: #ff7887; font-size: 12px; font-weight: 800; white-space: nowrap;">Requiere corrección</span>
                                             <?php elseif ($puedeSolicitarRevision): ?>
                                                 <span style="color: var(--color-pencil-gray); font-size: 12px; font-weight: 800; white-space: nowrap;">Disponible para revisión</span>
                                             <?php endif; ?>

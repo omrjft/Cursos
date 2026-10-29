@@ -487,19 +487,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800;900&display=swap" rel="stylesheet">
     <style>
         :root {
-            /* Colores de DESIGN.md */
-            --color-eager-green: #58cc02;
-            --color-storybook-green: #d7ffb8;
-            --color-spark-blue: #1cb0f6;
-            --color-fresh-leaf: #a5ed6e;
-            --color-night-ink: #000437;
-            --color-paper-white: #ffffff;
-            --color-charcoal: #4b4b4b;
-            --color-pencil-gray: #777777;
-            --color-faded-gray: #afafaf;
-            --color-border-gray: #e5e5e5;
-            --color-error: #ea2b2b;
-            --color-error-bg: #ffdfe0;
+            /* Paleta oscura con acentos azules */
+            --color-eager-green: #3b82f6;
+            --color-storybook-green: #1d3554;
+            --color-spark-blue: #60a5fa;
+            --color-fresh-leaf: #3b82f6;
+            --color-night-ink: #e6edf7;
+            --color-paper-white: #111b2b;
+            --color-charcoal: #e6edf7;
+            --color-pencil-gray: #a7b3c5;
+            --color-faded-gray: #516176;
+            --color-border-gray: #29384d;
+            --color-bg-light: #0b1220;
+            --color-error: #ff7887;
+            --color-error-bg: #3a2028;
 
             /* Tipografía */
             --font-family: 'Nunito', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -515,7 +516,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         body {
             font-family: var(--font-family);
-            background-color: var(--color-paper-white);
+            background-color: #0b1220;
             color: var(--color-charcoal);
             min-height: 100vh;
             min-height: 100svh;
@@ -712,7 +713,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             border: 2px solid var(--color-faded-gray);
             border-radius: var(--radius-card);
             padding: 36px 32px;
-            box-shadow: 0 4px 0 #e5e5e5;
+            box-shadow: 0 4px 0 #07101d;
         }
 
         .login-card-title {
@@ -788,7 +789,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             font-size: 16px;
             font-weight: 500;
             color: var(--color-charcoal);
-            background-color: #f7f7f7;
+            background-color: var(--color-bg-light);
             border: 2px solid var(--color-border-gray);
             border-radius: var(--radius-btn);
             outline: none;
@@ -802,7 +803,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         .form-input.input-invalid {
             border-color: var(--color-error);
-            background-color: #fff9f9;
+            background-color: #291a23;
         }
 
         /* Botón de ojo para contraseña */
@@ -838,7 +839,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             width: 100%;
             height: 50px;
             background-color: var(--color-eager-green);
-            color: var(--color-paper-white);
             font-family: var(--font-family);
             font-size: 15px;
             font-weight: 800;
@@ -851,7 +851,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             align-items: center;
             justify-content: center;
             gap: 8px;
-            box-shadow: 0 4px 0 #46a302;
+            color: #ffffff;
+            box-shadow: 0 4px 0 #1d4ed8;
             transition: all 0.1s ease;
         }
 
@@ -861,7 +862,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         .btn-submit:active {
             transform: translateY(2px);
-            box-shadow: 0 2px 0 #46a302;
+            box-shadow: 0 2px 0 #1d4ed8;
         }
 
         /* Divisor visual */
@@ -974,7 +975,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             margin-bottom: 14px;
             border-radius: 50%;
             background: var(--color-storybook-green);
-            color: #2e7a00;
+            color: var(--color-spark-blue);
             font-weight: 900;
         }
 
@@ -987,7 +988,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             padding: 28px;
             width: min(1120px, calc(100% - 48px));
             border-radius: var(--radius-card);
-            background: #f2fbe9;
+            background: var(--color-storybook-green);
         }
 
         .info-cta p {

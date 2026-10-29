@@ -56,7 +56,7 @@ while ($postulacionSuperadmin = $resultadoPostulacionesSuperadmin->fetch_assoc()
                                 Enviada: <?= htmlspecialchars(date('d/m/Y H:i', strtotime($postulacionSuperadmin['fecha_solicitud'])), ENT_QUOTES, 'UTF-8') ?>
                             </p>
                         </div>
-                        <span style="display: inline-block; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 800; background: <?= $estadoPostulacionSuperadmin === 'pendiente' ? '#fff4cf' : ($estadoPostulacionSuperadmin === 'aprobada' ? 'var(--color-storybook-green)' : '#ffdfe0') ?>; color: var(--color-charcoal);">
+                        <span style="display: inline-block; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 800; background: <?= $estadoPostulacionSuperadmin === 'pendiente' ? '#3c3318' : ($estadoPostulacionSuperadmin === 'aprobada' ? 'var(--color-storybook-green)' : '#3a2028') ?>; color: var(--color-charcoal);">
                             <?= htmlspecialchars($estadoEtiquetaSuperadmin, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
                         </span>
                     </div>

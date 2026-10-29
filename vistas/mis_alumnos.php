@@ -4,7 +4,7 @@
 
 if (!isset($_SESSION["id"]) || ($_SESSION["rol_id"] ?? null) != 4) {
     http_response_code(403);
-    echo "<p style='color: #ea2b2b; font-weight: 700;'>Acceso denegado. Esta sección es exclusiva para ponentes.</p>";
+    echo "<p style='color: #ff7887; font-weight: 700;'>Acceso denegado. Esta sección es exclusiva para ponentes.</p>";
     return;
 }
 
@@ -98,7 +98,7 @@ while ($fila = $resultado->fetch_assoc()) {
                                 $colorProgreso = $progreso >= 70 ? 'var(--color-eager-green)' : ($progreso >= 40 ? 'var(--color-spark-blue)' : '#e67e22');
                                 ?>
                                 <div style="display: flex; align-items: center; gap: 10px;">
-                                    <div style="flex: 1; max-width: 120px; height: 10px; background-color: #e5e5e5; border-radius: 999px; overflow: hidden;">
+                                    <div style="flex: 1; max-width: 120px; height: 10px; background-color: var(--color-border-gray); border-radius: 999px; overflow: hidden;">
                                         <div style="width: <?= min(100, max(0, $progreso)) ?>%; height: 100%; background-color: <?= $colorProgreso ?>; border-radius: 999px;"></div>
                                     </div>
                                     <span style="font-weight: 800; font-size: 13px; color: var(--color-charcoal);">
